@@ -76,9 +76,9 @@ def train(opt):
     dataset.set_option(data_type={'whole_story': False, 'split_story': True, 'caption': False})
 
     dataset.train()
-    train_loader = DataLoader(dataset, batch_size=opt.batch_size, shuffle=opt.shuffle, num_workers=opt.workers)
+    train_loader = DataLoader(dataset, batch_size=opt.batch_size, shuffle=opt.shuffle)
     dataset.val()
-    val_loader = DataLoader(dataset, batch_size=opt.batch_size, shuffle=False, num_workers=opt.workers)
+    val_loader = DataLoader(dataset, batch_size=opt.batch_size, shuffle=False)
 
     ##################### set up model, criterion and optimizer ######
     bad_valid = 0
@@ -132,7 +132,7 @@ def train(opt):
                 logging.info("average {} score: {}".format(opt.reward_type, avg_score))
 
             loss.backward()
-            train_loss = loss.data[0]
+            train_loss = loss.item()
 
             nn.utils.clip_grad_norm(model.parameters(), opt.grad_clip, norm_type=2)
             optimizer.step()

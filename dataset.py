@@ -6,8 +6,6 @@ from __future__ import print_function
 
 import sys
 
-reload(sys)
-sys.setdefaultencoding('utf8')
 import json
 import h5py
 import os
@@ -24,15 +22,19 @@ import eval_utils
 
 
 class VISTDataset(Dataset):
+    """
+    AREL-datat-process处理完json格式文本数据后，存储为h5文件，创建dataloader的数据类，进而取数据
+    """
     def __init__(self, opt):
-        self.mode = 'train'  # by default
+        # 默认为训练模式
+        self.mode = 'train'  
         self.opt = opt
-
-        self.task = opt.task  # option: 'story_telling', 'image_captioning'
+        # option: 'story_telling', 'image_captioning'，默认为story_telling
+        self.task = opt.task  
         self.data_type = {
             'whole_story': False,
             'split_story': True,
-            'caption': False
+            'caption': True
         }
 
         # open the hdf5 file
@@ -60,12 +62,12 @@ class VISTDataset(Dataset):
 
         self.story_ids = {'train': [], 'val': [], 'test': []}
         self.description_ids = {'train': [], 'val': [], 'test': []}
-        self.story_ids['train'] = self.story_line['train'].keys()
-        self.story_ids['val'] = self.story_line['val'].keys()
-        self.story_ids['test'] = self.story_line['test'].keys()
-        self.description_ids['train'] = self.story_line['image2caption']['train'].keys()
-        self.description_ids['val'] = self.story_line['image2caption']['val'].keys()
-        self.description_ids['test'] = self.story_line['image2caption']['test'].keys()
+        self.story_ids['train'] = list(self.story_line['train'].keys())
+        self.story_ids['val'] = list(self.story_line['val'].keys())
+        self.story_ids['test'] = list(self.story_line['test'].keys())
+        self.description_ids['train'] = list(self.story_line['image2caption']['train'].keys())
+        self.description_ids['val'] = list(self.story_line['image2caption']['val'].keys())
+        self.description_ids['test'] = list(self.story_line['image2caption']['test'].keys())
 
         print('There are {} training data, {} validation data, and {} test data'.format(len(self.story_ids['train']),
                                                                                         len(self.story_ids['val']),
@@ -89,21 +91,25 @@ class VISTDataset(Dataset):
         # write reference files for captioning
         for split in ['val', 'test']:
             reference = {}
-            for flickr_id, story in self.story_line['image2caption_original'][split].iteritems():
+            for flickr_id, story in self.story_line['image2caption_original'][split].items():
                 reference[flickr_id] = story
             with open(os.path.join(ref_dir, '{}_desc_reference.json'.format(split)), 'w') as f:
                 json.dump(reference, f)
 
     def __getitem__(self, index):
+        """
+        获取一条数据
+        """
         if self.task == 'story_telling':
+            # 先获取story_id，再获取
             story_id = self.story_ids[self.mode][index]
             story = self.story_line[self.mode][story_id]
 
             # load feature
             feature_fc = np.zeros((story['length'], self.opt.feat_size), dtype='float32')
             feature_conv = np.zeros((story['length'], self.opt.conv_feat_size), dtype='float32')
-            for i in xrange(story['length']):
-                # load fc feature
+            for i in range(story['length']):
+                # load fc feature，一个story对应五个图像id
                 fc_path = os.path.join(self.opt.data_dir, 'resnet_features/fc', self.mode,
                                        '{}.npy'.format(story['flickr_id'][i]))
                 feature_fc[i] = np.load(fc_path)
@@ -111,7 +117,6 @@ class VISTDataset(Dataset):
                     conv_path = os.path.join(self.opt.data_dir, 'resnet_features/conv', self.mode,
                                              '{}.npz'.format(story['flickr_id'][i]))
                     feature_conv[i] = np.load(conv_path)['arr_0'].flatten()
-
             sample = {'feature_fc': feature_fc}
             if self.opt.use_conv:
                 sample['feature_conv'] = feature_conv
@@ -125,7 +130,7 @@ class VISTDataset(Dataset):
                 split_story = self.story_h5[story['text_index']]
                 sample['split_story'] = np.int64(split_story)
 
-            # load caption
+            # load caption，在列表里面随机选择一个caption，如果没有对应的caption，则填充为0
             if self.data_type['caption']:
                 caption = []
                 for flickr_id in story['flickr_id']:
@@ -243,7 +248,7 @@ if __name__ == "__main__":
     start = time.time()
 
     dataset.train()
-    train_loader = DataLoader(dataset, batch_size=64, shuffle=opt.shuffle, num_workers=8)
+    train_loader = DataLoader(dataset, batch_size=64, shuffle=opt.shuffle)
 
     print("dataloader finished: ", time.time() - start)
 
@@ -251,4 +256,4 @@ if __name__ == "__main__":
     for iter, batch in enumerate(train_loader):
         print("enumerate: ", time.time() - start)
         print(iter)
-        print(batch[0].size())
+        # print(batch[0].size())
