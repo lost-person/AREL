@@ -107,10 +107,10 @@ class Evaluator:
         count = 0
         for iter, batch in enumerate(loader):
             iter_start = time.time()
-
-            feature_fc = Variable(batch['feature_fc'], volatile=True).cuda()
-            target = Variable(batch['split_story'], volatile=True).cuda()
-            conv_feature = Variable(batch['feature_conv'], volatile=True).cuda() if 'feature_conv' in batch else None
+            with torch.no_grad():
+                feature_fc = Variable(batch['feature_fc']).cuda()
+                target = Variable(batch['split_story']).cuda()
+                conv_feature = Variable(batch['feature_conv']).cuda() if 'feature_conv' in batch else None
 
             count += feature_fc.size(0)
 
@@ -127,7 +127,7 @@ class Evaluator:
                 else:
                     output = model(feature_fc, target)
 
-            loss = crit(output, target).data[0]
+            loss = crit(output, target).item()
             loss_sum += loss
             loss_evals += 1
 

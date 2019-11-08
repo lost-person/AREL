@@ -54,7 +54,7 @@ def parse_opt():
                         help='strength of dropout in the Language Model RNN')
     parser.add_argument('--dropout', type=float, default=0.5,
                         help='strength of dropout in the Language Model RNN')
-    parser.add_argument('--beam_size', type=int, default=1,
+    parser.add_argument('--beam_size', type=int, default=3,
                         help='indicates number of beams in beam search. This is only used in the evaluation mode')
 
     # Optimization: for the Language Model

@@ -79,6 +79,7 @@ def train(opt):
     train_loader = DataLoader(dataset, batch_size=opt.batch_size, shuffle=opt.shuffle)
     dataset.val()
     val_loader = DataLoader(dataset, batch_size=opt.batch_size, shuffle=False)
+    # m = dataset.word2id
 
     ##################### set up model, criterion and optimizer ######
     bad_valid = 0
@@ -108,7 +109,7 @@ def train(opt):
             opt.ss_prob = min(opt.scheduled_sampling_increase_prob *
                               frac, opt.scheduled_sampling_max_prob)
             model.ss_prob = opt.ss_prob
-
+        # 对数据进行一个batch一个batch的迭代
         for iter, batch in enumerate(train_loader):
             start = time.time()
             logger.iteration += 1
@@ -120,7 +121,7 @@ def train(opt):
 
             optimizer.zero_grad()
 
-            # cross entropy loss
+            # cross entropy loss，返回一个概率分布
             output = model(feature_fc, target)
             loss = crit(output, target)
 

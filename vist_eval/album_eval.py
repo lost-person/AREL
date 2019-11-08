@@ -42,11 +42,11 @@ class AlbumEvaluator:
             if type(method) == list:
                 for sc, scs, m in zip(score, scores, method):
                     self.setEval(sc, m)
-                    self.setAlbumToEval(scs, self.album_to_Gts.keys(), m)
+                    self.setAlbumToEval(scs, list(self.album_to_Gts.keys()), m)
                     print('%s: %.3f' % (m, sc))
             else:
                 self.setEval(score, method)
-                self.setAlbumToEval(scores, self.album_to_Gts.keys(), method)
+                self.setAlbumToEval(scores, list(self.album_to_Gts.keys()), method)
                 print('%s: %.3f' % (method, score))
 
         self.setEvalAlbums()

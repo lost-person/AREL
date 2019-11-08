@@ -87,11 +87,11 @@ class BaseModel(nn.Module):
                     output2.view(1, -1, output2.size(-1)))
 
     def decode(self, imgs, last_word, state_d, penalize_previous=False):
+        # imgs：320*512；last_word：320；state_d：1*320*512
         # 'last_word' is Variable contraining a word index
         # batch_size * input_encoding_size
         word_emb = self.embed(last_word)
-        word_emb = torch.unsqueeze(word_emb, 1)
-
+        word_emb = torch.unsqueeze(word_emb, 1) # 320*1*512
         input_d = torch.cat([word_emb, imgs.unsqueeze(1)], 2)  # batch_size * 1 * dim
         input_d = self.project_d(input_d)
 
@@ -107,21 +107,21 @@ class BaseModel(nn.Module):
 
         return log_probs, state_d
 
-    def forward(self, features, caption):
+    def forward(self, features, story_t):
         """
         :param features: (batch_size, 5, feat_size)
         :param caption: (batch_size, 5, seq_length)
         :return:
         """
-        # encode the visual features
+        # encode the visual features features：64*5*2048 out_e：64*5*512
         out_e, _ = self.encoder(features)
 
         # reshape the inputs, making the sentence generation separately
-        out_e = out_e.view(-1, out_e.size(2))
-        caption = caption.view(-1, caption.size(2))
+        out_e = out_e.view(-1, out_e.size(2)) # 320*512
+        story_t = story_t.view(-1, story_t.size(2)) # 320*30
 
         ############################# decoding stage ##############################
-        batch_size = out_e.size(0)
+        batch_size = out_e.size(0) #320
 
         # initialize decoder's state
         # state_d = self.init_hidden(batch_size, bi=False, dim=self.hidden_dim)
@@ -139,20 +139,20 @@ class BaseModel(nn.Module):
                 sample_prob = torch.FloatTensor(batch_size).uniform_(0, 1).cuda()
                 sample_mask = sample_prob < self.ss_prob
                 if sample_mask.sum() == 0:
-                    last_word = caption[:, i].clone()
+                    last_word = story_t[:, i].clone()
                 else:
                     sample_ind = sample_mask.nonzero().view(-1)
-                    last_word = caption[:, i].data.clone()
+                    last_word = story_t[:, i].data.clone()
                     # fetch prev distribution: shape Nx(M+1)
                     prob_prev = torch.exp(log_probs.data)
                     last_word.index_copy_(0, sample_ind,
                                           torch.multinomial(prob_prev, 1).view(-1).index_select(0, sample_ind))
                     last_word = Variable(last_word)
-            else:
-                last_word = caption[:, i].clone()
+            else: # 训练时直接使用上一个词作为标签
+                last_word = story_t[:, i].clone()
 
             # break condition
-            if i >= 1 and caption[:, i].data.sum() == 0:
+            if i >= 1 and story_t[:, i].data.sum() == 0:
                 break
 
         outputs = torch.cat([_.unsqueeze(1) for _ in outputs], 1)  # batch_size * 5, -1, vocab_size

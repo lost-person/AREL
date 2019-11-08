@@ -45,6 +45,7 @@ def _smallest(matrix, k, only_first_row=False):
 
 
 class VisualEncoder(nn.Module):
+
     def __init__(self, opt):
         super(VisualEncoder, self).__init__()
         # embedding (input) layer options
@@ -82,7 +83,7 @@ class VisualEncoder(nn.Module):
             self.position_embed = nn.Embedding(self.story_size, self.embed_dim)
 
     def init_hidden(self, batch_size, bi, dim):
-        # the first parameter from the class
+        # the first parameter from the class，初始化为0
         weight = next(self.parameters()).data
         times = 2 if bi else 1
         if self.rnn_type == 'gru':
@@ -101,13 +102,13 @@ class VisualEncoder(nn.Module):
         """
         batch_size, seq_length = input.size(0), input.size(1)
 
-        # visual embeded
+        # visual embeded，过一个线性层将其第三个维度设为512
         emb = self.visual_emb(input.view(-1, self.feat_size))
         emb = emb.view(batch_size, seq_length, -1)  # (Na, album_size, embedding_size)
 
         # visual rnn layer
         if hidden is None:
-            hidden = self.init_hidden(batch_size, bi=True, dim=self.hidden_dim // 2)
+            hidden = self.init_hidden(batch_size, bi=True, dim=self.hidden_dim // 2) # 最后一个维度为512/2=256
         rnn_input = self.hin_dropout_layer(emb)  # apply dropout
         houts, hidden = self.rnn(rnn_input, hidden)
 
@@ -116,7 +117,7 @@ class VisualEncoder(nn.Module):
         out = self.relu(out)  # (batch_size, 5, embed_dim)
 
         if self.with_position:
-            for i in xrange(self.story_size):
+            for i in range(self.story_size):
                 position = Variable(input.data.new(batch_size).long().fill_(i))
                 out[:, i, :] = out[:, i, :] + self.position_embed(position)
 
