@@ -48,7 +48,6 @@ def decode_story(id2word, result):
     out: a list of stories. the size of the list is batch_size
     """
     batch_size, story_size, seq_length = result.size()
-
     out = []
     for i in range(batch_size):
         txt = ''

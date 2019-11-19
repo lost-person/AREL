@@ -78,6 +78,7 @@ class VISTDataset(Dataset):
             os.makedirs(ref_dir)
 
         # write reference files for storytelling
+        
         for split in ['val', 'test']:
             reference = {}
             for story in self.story_line[split].values():
@@ -129,6 +130,7 @@ class VISTDataset(Dataset):
             if self.data_type['split_story']:
                 split_story = self.story_h5[story['text_index']]
                 sample['split_story'] = np.int64(split_story)
+
 
             # load caption，在列表里面随机选择一个caption，如果没有对应的caption，则填充为0
             if self.data_type['caption']:

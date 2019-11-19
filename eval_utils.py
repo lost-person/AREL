@@ -1,12 +1,5 @@
 # encoding=utf8
-
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-
 import sys
-
-
 import os
 import json
 import hashlib
@@ -65,23 +58,26 @@ class CocoResFormat:
             json.dump(self.res, fd, ensure_ascii=False, sort_keys=True,
                       indent=2, separators=(',', ': '))
 
-
 class Evaluator:
     def __init__(self, opt, mode='val'):
+        # 载入reference数据
         if opt.task == 'story_telling' or opt.task == 'story_telling_with_caption':
             ref_json_path = "data/reference/{}_reference.json".format(mode)
         else:
             ref_json_path = "data/reference/{}_desc_reference.json".format(mode)
         self.reference = json.load(open(ref_json_path))
         print("loading file {}".format(ref_json_path))
+        # 获取模型生成的数据
         self.save_dir = os.path.join(opt.checkpoint_path, opt.id)
         self.prediction_file = os.path.join(self.save_dir, 'prediction_{}'.format(mode))
+        # 获取计算分数的类
         self.eval = AlbumEvaluator()
+        self.opt = opt
 
     def measure(self):
         json_prediction_file = '{}.json'.format(self.prediction_file)
         predictions = {}
-        with open(self.prediction_file) as f:
+        with open(self.prediction_file, 'r', encoding='utf-8') as f:
             for line in f:
                 vid, seq = line.strip().split('\t')
                 if vid not in predictions:
@@ -92,7 +88,7 @@ class Evaluator:
         return self.eval.eval_overall
 
     def eval_story(self, model, crit, dataset, loader, opt, side_model=None):
-        # Make sure in the evaluation mode
+
         logging.info("Evaluating...")
         start = time.time()
         model.eval()
@@ -101,20 +97,22 @@ class Evaluator:
         loss_sum = 0
         loss_evals = 0
         predictions = {}
-
-        prediction_txt = open(self.prediction_file, 'w')  # open the file to store the predictions
+        prediction_txt = open(self.prediction_file, 'w')  # 写入生成的story
 
         count = 0
+        caption = None
         for iter, batch in enumerate(loader):
             iter_start = time.time()
             with torch.no_grad():
                 feature_fc = Variable(batch['feature_fc']).cuda()
+                count += feature_fc.size(0)
+                if self.opt.caption:
+                    caption = Variable(batch['caption']).cuda()
                 target = Variable(batch['split_story']).cuda()
                 conv_feature = Variable(batch['feature_conv']).cuda() if 'feature_conv' in batch else None
 
-            count += feature_fc.size(0)
-
-            if side_model is not None:
+            if side_model is not None:    
+                # 若需使用side_model与feature，此处需要修改
                 story, _ = side_model.predict(feature_fc.view(-1, feature_fc.shape[2]), 1)
                 story = Variable(story).cuda()
                 if conv_feature is not None:
@@ -125,12 +123,11 @@ class Evaluator:
                 if conv_feature is not None:
                     output = model(feature_fc, target, conv_feature)
                 else:
-                    output = model(feature_fc, target)
-
+                    output = model(feature_fc, target, caption) # 调用basemodel中的forward函数
+            # 计算 loss
             loss = crit(output, target).item()
             loss_sum += loss
             loss_evals += 1
-
             # forward the model to also get generated samples for each video
             if side_model is not None:
                 if conv_feature is not None:
@@ -141,26 +138,21 @@ class Evaluator:
                 if conv_feature is not None:
                     results, _ = model.predict(feature_fc, conv_feature, beam_size=opt.beam_size)
                 else:
-                    results, _ = model.predict(feature_fc, beam_size=opt.beam_size)
-            stories = utils.decode_story(dataset.get_vocab(), results)
+                    results, _ = model.predict(feature_fc, caption, beam_size=opt.beam_size)
+            stories = utils.decode_story(dataset.get_vocab(), results) # 解码为单词
 
             indexes = batch['index'].numpy()
             for j, story in enumerate(stories):
                 vid, _ = dataset.get_id(indexes[j])
                 if vid not in predictions:  # only predict one story for an album
-                    # write into txt file for evaluate metrics like Cider
-                    prediction_txt.write('{}\t {}\n'.format(vid, story))
-                    # save into predictions
+                    prediction_txt.write('{}\t{}\n'.format(vid, story))
                     predictions[vid] = story
-
             logging.info("Evaluate iter {}/{}  {:04.2f}%. Time used: {}".format(iter,
                                                                                 len(loader),
                                                                                 iter * 100.0 / len(loader),
                                                                                 time.time() - iter_start))
-
         prediction_txt.close()
         metrics = self.measure()  # compute all the language metrics
-
         # Switch back to training mode
         model.train()
         dataset.train()
@@ -178,13 +170,15 @@ class Evaluator:
 
         for iter, batch in enumerate(loader):
             iter_start = time.time()
-
+            caption = None
+            if self.opt.caption:
+                caption = Variable(batch['caption']).cuda()
             feature_fc = Variable(batch['feature_fc'], volatile=True).cuda()
             feature_conv = Variable(batch['feature_conv'], volatile=True).cuda() if 'feature_conv' in batch else None
             if feature_conv is not None:
                 results, _ = model.predict(feature_fc, feature_conv, beam_size=opt.beam_size)
             else:
-                results, _ = model.predict(feature_fc, beam_size=opt.beam_size)
+                results, _ = model.predict(feature_fc, caption, beam_size=opt.beam_size)
 
             sents = utils.decode_story(dataset.get_vocab(), results)
 

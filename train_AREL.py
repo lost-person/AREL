@@ -55,25 +55,17 @@ class Flag:
 def train(opt):
     logger = Logger(opt)
     flag = Flag(D_iters=opt.D_iter, G_iters=opt.G_iter, always=opt.always)
-    ################### set up dataset and dataloader ########################
+
     dataset = VISTDataset(opt)
     opt.vocab_size = dataset.get_vocab_size()
     opt.seq_length = dataset.get_story_length()
-
     dataset.set_option(data_type={'whole_story': False, 'split_story': True, 'caption': False})
 
-    dataset.train()
     train_loader = DataLoader(dataset, batch_size=opt.batch_size, shuffle=opt.shuffle, num_workers=opt.workers)
-    dataset.val()
     val_loader = DataLoader(dataset, batch_size=opt.batch_size, shuffle=False, num_workers=opt.workers)
-
-    ##################### set up model, criterion and optimizer ######
     bad_valid = 0
 
-    # set up evaluator
     evaluator = Evaluator(opt, 'val')
-
-    # set up criterion
     crit = criterion.LanguageModelCriterion()
     rl_crit = criterion.ReinforceCriterion(opt, dataset)
 
@@ -82,13 +74,12 @@ def train(opt):
     model.cuda()
     disc_opt = copy.copy(opt)
     disc_opt.model = 'RewardModel'
-    disc = models.setup(disc_opt)
+    disc = models.setup(disc_opt) # 判别器
     if os.path.exists(os.path.join(logger.log_dir, 'disc-model.pth')):
         logging.info("loading pretrained RewardModel")
         disc.load_state_dict(torch.load(os.path.join(logger.log_dir, 'disc-model.pth')))
     disc.cuda()
 
-    # set up optimizer
     optimizer = setup_optimizer(opt, model)
     disc_optimizer = setup_optimizer(opt, disc)
 
@@ -97,8 +88,6 @@ def train(opt):
     disc.train()
     ############################## training ##################################
     for epoch in range(logger.epoch_start, opt.max_epochs):
-        # Assign the scheduled sampling prob
-
         start = time.time()
         for iter, batch in enumerate(train_loader):
             logger.iteration += 1
@@ -111,10 +100,10 @@ def train(opt):
             optimizer.zero_grad()
             disc_optimizer.zero_grad()
 
-            if flag.flag == "Disc":
+            if flag.flag == "Disc": # True
                 model.eval()
                 disc.train()
-                if opt.decoding_method_DISC == 'sample':
+                if opt.decoding_method_DISC == 'sample': # True
                     seq, seq_log_probs, baseline = model.sample(feature_fc, sample_max=False, rl_training=True,
                                                                 pad=True)
                 elif opt.decoding_method_DISC == 'greedy':
@@ -127,8 +116,7 @@ def train(opt):
 
             seq = Variable(seq).cuda()
             mask = (seq > 0).float()
-            mask = to_contiguous(
-                torch.cat([Variable(mask.data.new(mask.size(0), mask.size(1), 1).fill_(1)), mask[:, :, :-1]], 2))
+            mask = to_contiguous(torch.cat([Variable(mask.data.new(mask.size(0), mask.size(1), 1).fill_(1)), mask[:, :, :-1]], 2))
             normed_seq_log_probs = (seq_log_probs * mask).sum(-1) / mask.sum(-1)
 
             gen_score = disc(seq.view(-1, seq.size(2)), feature_fc.view(-1, feature_fc.size(2)))
@@ -151,8 +139,7 @@ def train(opt):
                 loss, avg_score = rl_crit(seq.data, seq_log_probs, baseline, index, rewards)
                 # if logger.iteration % opt.losses_log_every == 0:
                 avg_pos_score = torch.mean(gen_score)
-                logging.info(
-                    "average reward: {} average IRL score: {}".format(avg_score.data[0], avg_pos_score.data[0]))
+                logging.info("average reward: {} average IRL score: {}".format(avg_score.data[0], avg_pos_score.data[0]))
 
             if flag.flag == "Disc":
                 loss.backward()
@@ -215,7 +202,7 @@ def test(opt):
     opt.seq_length = dataset.get_story_length()
 
     dataset.test()
-    test_loader = DataLoader(dataset, batch_size=opt.batch_size, shuffle=False, num_workers=opt.workers)
+    test_loader = DataLoader(dataset, batch_size=opt.batch_size, shuffle=False)
     evaluator = Evaluator(opt, 'test')
     model = models.setup(opt)
     model.cuda()

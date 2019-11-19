@@ -1,7 +1,3 @@
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-
 import torch
 import numpy as np
 import time
@@ -9,37 +5,38 @@ import os
 from six.moves import cPickle
 import logging
 
-
 class TensorBoard:
     def __init__(self, opt):
+        # 导入 tensorflow
         try:
             import tensorflow as tf
         except ImportError:
             logging.info("Tensorflow not installed; No tensorboard logging.")
             tf = None
         self.tf = tf
-
+        # tensorboard 存储路径设置，无则创建
         self.dir = os.path.join(opt.checkpoint_path, 'tensorboard', opt.id)
         if not os.path.exists(self.dir):
             os.makedirs(self.dir)
-
+        # 指定文件保存图
         self.writer = self.tf and self.tf.summary.FileWriter(self.dir)
 
     def add_summary_value(self, key, value, iteration):
+        """加入日志，key-value，以及迭代次数"""
         summary = self.tf.Summary(value=[self.tf.Summary.Value(tag=key, simple_value=value)])
         self.writer.add_summary(summary, iteration)
 
-
 class Logger:
     def __init__(self, opt):
-        self.start = time.time()  # start timing
-
+        # 记录开始时间
+        self.start = time.time()
+        # 日志文件的路径，若不存在就创建该目录
         self.log_dir = os.path.join(opt.checkpoint_path, opt.id)
         if not os.path.exists(self.log_dir):
             os.makedirs(self.log_dir)
-        # set up logging
+        # 调用 set_logging 函数
         self.set_logging(self.log_dir, opt)
-
+        # 创建 Tensorboard 对象，自定义的类， 可以通过 add_summary_value 函数加入信息
         self.tensorboard = TensorBoard(opt)
 
         # print all the options
@@ -50,9 +47,9 @@ class Logger:
 
         self.infos = {}
         self.histories = {}
+        # open old infos and check if models are compatible，载入之前的信息，默认为 None
         if opt.resume_from is not None:
-            # open old infos and check if models are compatible
-            with open(os.path.join(opt.resume_from, 'infos.pkl')) as f:
+            with open(os.path.join(opt.resume_from, 'infos.pkl'), 'rb') as f:
                 self.infos = cPickle.load(f)
                 saved_model_opt = self.infos['opt']
                 need_be_same = ["num_layers"]
@@ -61,28 +58,33 @@ class Logger:
                         checkme], "Command line argument and saved model disagree on {}".format(checkme)
 
             if os.path.isfile(os.path.join(opt.resume_from, 'histories.pkl')):
-                with open(os.path.join(opt.resume_from, 'histories.pkl')) as f:
+                with open(os.path.join(opt.resume_from, 'histories.pkl'), 'rb') as f:
                     self.histories = cPickle.load(f)
-
-        self.iteration = self.infos.get('iter', 0)  # total number of iterations, regardless epochs
+        # 初始化 info 键值对
+        # total number of iterations, regardless epochs，记录总的迭代次数
+        self.iteration = self.infos.get('iter', 0)  # get为字典操作，若键不存在，则使用后面默认值
         self.epoch_start = self.infos.get('epoch', -1) + 1
-        if opt.load_best_score:
+        if opt.load_best_score: # 默认为 True
             self.best_val_score = self.infos.get('best_val_score', None)
-
+        # 初始化历史字典
         self.val_result_history = self.histories.get('val_result_history', {})
         self.loss_history = self.histories.get('loss_history', {})
         self.lr_history = self.histories.get('lr_history', {})
         self.ss_prob_history = self.histories.get('ss_prob_history', {})
 
     def set_logging(self, log_dir, opt):
-        # set up logging to file - see previous section for more details
+        """
+        参数： logdir-日志文件路径、opt-参数
+        """
+        # 将日志记录到 log.txt 文件中
         logging.basicConfig(level=logging.DEBUG,
                             format='%(asctime)s %(levelname)-8s %(message)s',
                             datefmt='%m-%d %H:%M',
                             filename=os.path.join(log_dir, "log.txt"),
                             filemode='w')
-        # define a Handler which writes INFO messages or higher to the sys.stderr
+        # 创建一个日志 handler，用于输出至控制台，输出至文件的 handler 为 FileHandler
         console = logging.StreamHandler()
+        # logging. 分五个级别：DEBUG INFO WARNING ERROR CRITICAL。
         console.setLevel(logging.DEBUG)
 
         # set a format which is simpler for console use

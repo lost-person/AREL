@@ -1,13 +1,9 @@
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from torch.autograd import *
 import numpy as np
 import time
+from models.attention import luong_gate_attention
 
 
 class AttentionLayer(nn.Module):
@@ -33,92 +29,177 @@ class AttentionLayer(nn.Module):
 
         return a
 
-
 def _smallest(matrix, k, only_first_row=False):
-    if only_first_row:
-        flatten = matrix[:1, :].flatten()
+    # matrix ： beam*vocab（记录了到当前步骤的总cost）  k：beam
+    # 选取beam个最小的
+    if only_first_row: # 是否为第一个词，第一个词概率都相同，取第一行即可
+        flatten = matrix[:1, :].flatten() # 取出第一行概率分布，9837
     else:
         flatten = matrix.flatten()
-    args = np.argpartition(flatten, k)[:k]
-    args = args[np.argsort(flatten[args])]
-    return np.unravel_index(args, matrix.shape), flatten[args]
-
+    args = np.argpartition(flatten, k)[:k] # 比第三名好的放在数组前面，差的放在后面，无序，返回索引
+    args = args[np.argsort(flatten[args])] # 取出相应的值并排序，argsort返回下标，args取出相应索引值
+    # 返回值：前面返回matrix中的位置，最后一个返回概率最大的三个值
+    return np.unravel_index(args, matrix.shape), flatten[args] # 前面函数计算args在matrix维度的矩阵中位置
 
 class VisualEncoder(nn.Module):
 
     def __init__(self, opt):
         super(VisualEncoder, self).__init__()
+        self.feat_size = opt.feat_size # 2048
+        self.embed_dim = opt.word_embed_dim # 512
+
+        self.rnn_type = opt.rnn_type # gru
+        self.num_layers = opt.num_layers # 1
+        self.hidden_dim = opt.hidden_dim # 512
+        self.dropout = opt.visual_dropout # 0.2
+        self.story_size = opt.story_size # 5
+        self.with_position = opt.with_position # False
+
+        # visual embedding layer
+        self.visual_emb = nn.Sequential(nn.Linear(self.feat_size, self.embed_dim),
+                                        nn.BatchNorm1d(self.embed_dim),
+                                        nn.ReLU(True))
+        self.hin_dropout_layer = nn.Dropout(self.dropout)
+
+        if self.rnn_type == 'gru':
+            self.rnn = nn.GRU(input_size=self.embed_dim, hidden_size=self.hidden_dim,
+                              dropout=self.dropout, batch_first=True, bidirectional=True)
+        elif self.rnn_type == 'lstm':
+            self.rnn = nn.LSTM(input_size=self.embed_dim, hidden_size=self.hidden_dim,
+                               dropout=self.dropout, batch_first=True, bidirectional=True)
+        else:
+            raise Exception("RNN type is not supported: {}".format(self.rnn_type))
+
+        self.project_layer = nn.Linear(self.hidden_dim * 2, self.embed_dim)
+        self.relu = nn.ReLU()
+        if self.with_position: # 是否可以改为transformer那样的position
+            self.position_embed = nn.Embedding(self.story_size, self.embed_dim)
+
+    def init_hidden(self, batch_size, bi, dim):
+        # LSTM的初始隐状态，默认为0
+        weight = next(self.parameters()).data
+        times = 2 if bi else 1
+        if self.rnn_type == 'gru':
+            return weight.new(self.num_layers * times, batch_size, dim).zero_()
+        else:
+            return (weight.new(self.num_layers * times, batch_size, dim).zero_(),
+                    weight.new(self.num_layers * times, batch_size, dim).zero_())
+
+    def forward(self, input, hidden=None):
+
+        batch_size, story_size = input.size(0), input.size(1) # (batch_size, 5, feat_size)
+        emb = self.visual_emb(input.view(-1, self.feat_size)) # 过一个线性层，2048-512
+        emb = emb.view(batch_size, story_size, -1)  # view变回三维 64*5*512
+        rnn_input = self.hin_dropout_layer(emb)  # apply dropout
+        # if hidden is None:
+        #     hidden = self.init_hidden(batch_size, bi=True, dim=self.hidden_dim // 2) # 最后一个维度为512/2=256
+        houts, hidden = self.rnn(rnn_input)
+        
+        out = emb + self.project_layer(houts) # 原始的 visual_emb + rnn输出的结果, 改为concat？
+        out = self.relu(out)  # (batch_size, 5, embed_dim)
+
+        if self.with_position:
+            for i in range(self.story_size):
+                position = torch.tensor(input.data.new(batch_size).long().fill_(i))
+                out[:, i, :] = out[:, i, :] + self.position_embed(position)
+
+        return out, hidden
+
+class CaptionEncoder(nn.Module):
+
+    def __init__(self, opt):
+        super(CaptionEncoder, self).__init__()
         # embedding (input) layer options
-        self.feat_size = opt.feat_size
+        self.opt = opt
         self.embed_dim = opt.word_embed_dim
+        
         # rnn layer options
         self.rnn_type = opt.rnn_type
         self.num_layers = opt.num_layers
         self.hidden_dim = opt.hidden_dim
         self.dropout = opt.visual_dropout
         self.story_size = opt.story_size
-        self.with_position = opt.with_position
-
-        # visual embedding layer
-        self.visual_emb = nn.Sequential(nn.Linear(self.feat_size, self.embed_dim),
-                                        nn.BatchNorm1d(self.embed_dim),
-                                        nn.ReLU(True))
-
-        # visual rnn layer
-        self.hin_dropout_layer = nn.Dropout(self.dropout)
-        if self.rnn_type == 'gru':
-            self.rnn = nn.GRU(input_size=self.embed_dim, hidden_size=self.hidden_dim // 2,
-                              dropout=self.dropout, batch_first=True, bidirectional=True)
-        elif self.rnn_type == 'lstm':
-            self.rnn = nn.LSTM(input_size=self.embed_dim, hidden_size=self.hidden_dim // 2,
-                               dropout=self.dropout, batch_first=True, bidirectional=True)
+        if self.opt.cnn_cap:
+            self.sw1 = nn.Sequential(nn.Conv1d(opt.hidden_dim, opt.hidden_dim, kernel_size=1, padding=0), nn.BatchNorm1d(opt.hidden_dim), nn.ReLU())
+            self.sw3 = nn.Sequential(nn.Conv1d(opt.hidden_dim, opt.hidden_dim, kernel_size=1, padding=0), nn.ReLU(), nn.BatchNorm1d(opt.hidden_dim),
+                                        nn.Conv1d(opt.hidden_dim, opt.hidden_dim, kernel_size=3, padding=1), nn.ReLU(), nn.BatchNorm1d(opt.hidden_dim))
+            self.sw33 = nn.Sequential(nn.Conv1d(opt.hidden_dim, opt.hidden_dim, kernel_size=1, padding=0), nn.ReLU(), nn.BatchNorm1d(opt.hidden_dim),
+                                        nn.Conv1d(opt.hidden_dim, opt.hidden_dim, kernel_size=3, padding=1), nn.ReLU(), nn.BatchNorm1d(opt.hidden_dim),
+                                        nn.Conv1d(opt.hidden_dim, opt.hidden_dim, kernel_size=3, padding=1), nn.ReLU(), nn.BatchNorm1d(opt.hidden_dim))
+            self.linear = nn.Sequential(nn.Linear(2*opt.hidden_dim, 2*opt.hidden_dim), nn.GLU(), nn.Dropout(opt.dropout))
+            self.filter_linear = nn.Linear(3*opt.hidden_dim, opt.hidden_dim)
+            self.tanh = nn.Tanh()
+            self.sigmoid = nn.Sigmoid()
+            self.cnn = nn.Sequential(nn.Conv1d(opt.hidden_dim, opt.hidden_dim, kernel_size=3, padding=1), nn.ReLU(), nn.BatchNorm1d(opt.hidden_dim))
         else:
-            raise Exception("RNN type is not supported: {}".format(self.rnn_type))
+            self.rnn = nn.GRU(input_size=self.embed_dim, hidden_size=self.hidden_dim, bidirectional=opt.bi, batch_first=True)
+            if opt.bi:
+                self.out_linear = nn.Sequential(nn.Linear(2*opt.hidden_dim, 2*opt.hidden_dim), nn.GLU(), nn.Dropout(opt.dropout))
+            self.sigmoid = nn.Sigmoid()
+        self.attention = luong_gate_attention(self.hidden_dim, self.embed_dim)
 
-        # residual part
-        self.project_layer = nn.Linear(self.hidden_dim, self.embed_dim)
-        self.relu = nn.ReLU()
+    def forward(self, input, embed):
+        # input: 64*5*20，分别对每句话进行卷积，提取句子特征
+        batch = input.size(0)
+        input = input.view(batch*5, -1)
+        mask = torch.zeros_like(input)
+        mask = input > 0 # batch*5,20
+        src_len = torch.sum(mask, dim=-1) # =batch*5
+        input = embed(input)
+        state = None
+        if self.opt.cnn_cap:
+            input = input.transpose(1, 2) # 320*512*20,卷积在最后一个维度扫
 
-        if self.with_position:
-            self.position_embed = nn.Embedding(self.story_size, self.embed_dim)
+            # outputs = self.cnn(input)
+            # outputs = outputs.transpose(1, 2)
 
-    def init_hidden(self, batch_size, bi, dim):
-        # the first parameter from the class，初始化为0
-        weight = next(self.parameters()).data
-        times = 2 if bi else 1
-        if self.rnn_type == 'gru':
-            return Variable(weight.new(self.num_layers * times, batch_size, dim).zero_())
-        else:
-            return (Variable(weight.new(self.num_layers * times, batch_size, dim).zero_()),
-                    Variable(weight.new(self.num_layers * times, batch_size, dim).zero_()))
+            conv1 = self.sw1(input)
+            conv3 = self.sw3(input)
+            conv33 = self.sw33(input)
+            conv = torch.cat((conv1, conv3, conv33), 1).transpose(1, 2)
+            conv = self.filter_linear(conv) # 320*20*512
+            outputs = conv
+            if self.opt.self_att: # 对句子内部进行自注意力，提取关键词特征
+                self.attention.init_context(input.transpose(1, 2).transpose(0, 1))
+                att_out, weights = self.attention(input.transpose(1, 2), selfatt=True)
+                gate = self.sigmoid(att_out.transpose(0, 1))
+                outputs = gate * conv
+        else: 
+            ## gru+self-att
+            # lengths, indices = torch.sort(src_len, dim=0, descending=True)
+            # input = torch.index_select(input, dim=0, index=indices) # batch*5,20,512
+            # embs = torch.nn.utils.rnn.pack_padded_sequence(input, lengths, batch_first=True)
+            # outputs, state = self.rnn(embs)
+            # outputs = torch.nn.utils.rnn.pad_packed_sequence(outputs)[0] # 19,batch*5,512
+            # outputs = outputs.transpose(0,1)
+            # # 排列为之前的顺序
+            # _, ind = torch.sort(indices)
+            # outputs = torch.index_select(outputs, dim=0, index=ind) # batch*5,seq_len,512
+            # state = torch.index_select(state.squeeze(), dim=0, index=ind)
+            # if self.opt.self_att:
+            #     self.attention.init_context(outputs.transpose(0, 1))
+            #     outputs, weights = self.attention(outputs, selfatt=True)
+            #     outputs = outputs.transpose(0, 1)
 
-    def forward(self, input, hidden=None):
-        """
-        inputs:
-        - input  	(batch_size, 5, feat_size)
-        - hidden 	(num_layers * num_dirs, batch_size, hidden_dim // 2)
-        return:
-        - out 		(batch_size, 5, rnn_size), serve as context
-        """
-        batch_size, seq_length = input.size(0), input.size(1)
+            ## 先self——att，再gru
+            if self.opt.self_att:
+                self.attention.init_context(input.transpose(0, 1))
+                outputs, weights = self.attention(input, selfatt=True)
+                outputs = outputs.transpose(0, 1)
+            else:
+                outputs = input
+            lengths, indices = torch.sort(src_len, dim=0, descending=True)
+            outputs = torch.index_select(outputs, dim=0, index=indices) # batch*5,20,512
+            embs = torch.nn.utils.rnn.pack_padded_sequence(outputs, lengths, batch_first=True)
+            outputs, state = self.rnn(embs) # state(2,320,512)
+            outputs = torch.nn.utils.rnn.pad_packed_sequence(outputs)[0] # 19,batch*5,512
+            if self.opt.bi:
+                outputs = self.out_linear(outputs.transpose(0,1))
+            else:
+                outputs = outputs.transpose(0,1)
+            # 排列为之前的顺序
+            _, ind = torch.sort(indices)
+            outputs = torch.index_select(outputs, dim=0, index=ind) # batch*5,seq_len,512
+            state = torch.index_select(state.squeeze(), dim=0, index=ind)
 
-        # visual embeded，过一个线性层将其第三个维度设为512
-        emb = self.visual_emb(input.view(-1, self.feat_size))
-        emb = emb.view(batch_size, seq_length, -1)  # (Na, album_size, embedding_size)
-
-        # visual rnn layer
-        if hidden is None:
-            hidden = self.init_hidden(batch_size, bi=True, dim=self.hidden_dim // 2) # 最后一个维度为512/2=256
-        rnn_input = self.hin_dropout_layer(emb)  # apply dropout
-        houts, hidden = self.rnn(rnn_input, hidden)
-
-        # residual layer
-        out = emb + self.project_layer(houts)
-        out = self.relu(out)  # (batch_size, 5, embed_dim)
-
-        if self.with_position:
-            for i in range(self.story_size):
-                position = Variable(input.data.new(batch_size).long().fill_(i))
-                out[:, i, :] = out[:, i, :] + self.position_embed(position)
-
-        return out, hidden
+        return outputs, state

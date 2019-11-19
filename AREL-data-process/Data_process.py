@@ -115,9 +115,9 @@ for i in range(len(id_whole_lines)):
 # shape(50200,105)
 data = numpy.asarray(new_id_whole_lines)
 
-f = h5py.File("full_story.h5", "w")
-f.create_dataset("story", data=data)
-f.close()
+# f = h5py.File("full_story.h5", "w")
+# f.create_dataset("story", data=data)
+# f.close()
 ## 对单个句子进行padding，大小为30
 new_id_story_lines = []
 specify_longest = 30
@@ -130,9 +130,9 @@ for i in range(len(id_story_lines)):
 ## （25100，30）
 data = numpy.asarray(new_id_story_lines, "int32")
 
-f = h5py.File("story.h5", "w")
-f.create_dataset("story", data=data)
-f.close()
+# f = h5py.File("story.h5", "w")
+# f.create_dataset("story", data=data)
+# f.close()
 
 # # 删除图像少于5张的
 # for p in prefix:
@@ -234,14 +234,14 @@ for i in range(len(text_list)):
 whole_album["image2caption"] = mapping
 whole_album["image2caption_original"] = mapping_original
 
-with open("story_line.json", 'w') as f:
-    json.dump(whole_album, f)
+# with open("story_line.json", 'w') as f:
+#     json.dump(whole_album, f)
 
 text_array = numpy.asarray(new_text_list, dtype='int32')
 
-f = h5py.File("description.h5", 'w')
-f.create_dataset("story", data=text_array)
-f.close()
+# f = h5py.File("description.h5", 'w')
+# f.create_dataset("story", data=text_array)
+# f.close()
 
 val_data = json.load(open(osp.join(base_path, "val.description-in-isolation.json")))
 with open("val_desc_reference", "w") as f:

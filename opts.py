@@ -4,10 +4,17 @@ import os
 
 def parse_opt():
     parser = argparse.ArgumentParser()
+    parser.add_argument('--GPU_ids', type=int, default=0)
+    # caption相关
+    parser.add_argument('--caption', type=bool, default=True)
+    parser.add_argument('--cnn_cap', type=bool, default=False)
+    parser.add_argument('--self_att', type=bool, default=True)
+    parser.add_argument('--use_state', type=bool, default=True)
+    parser.add_argument('--bi', type=bool, default=False)
 
     parser.add_argument('--debug', type=bool, default=False)
     parser.add_argument('--option', type=str, default='train', help='train | test')
-    parser.add_argument('--id', type=str, default='default', help='an id identifying this run/job')
+    parser.add_argument('--id', type=str, default='test', help='an id identifying this run/job')
 
     # Data input settings
     parser.add_argument('--data_dir', type=str, default='./VIST')
@@ -41,7 +48,7 @@ def parse_opt():
                         help='whether to use position embedding for the image feature')
 
     # Optimization: General
-    parser.add_argument('--max_epochs', type=int, default=100,
+    parser.add_argument('--max_epochs', type=int, default=50,
                         help='number of epochs')
     parser.add_argument('--shuffle', type=bool, default=True,
                         help='set to True to have the data reshuffled at every epoch during training ')
@@ -63,7 +70,7 @@ def parse_opt():
     parser.add_argument('--learning_rate', type=float, default=4e-4, help='learning rate')
     parser.add_argument('--learning_rate_decay_start', type=int, default=-1,
                         help='from which epoch to start decaying learning rate? (-1 = dont)')
-    parser.add_argument('--learning_rate_decay_every', type=int, default=5,
+    parser.add_argument('--learning_rate_decay_every', type=int, default=15,
                         help='every how many epochs thereafter to drop LR')
     parser.add_argument('--learning_rate_decay_rate', type=float, default=0.5,
                         help='every how many epochs thereafter to drop LR')

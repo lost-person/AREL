@@ -58,17 +58,15 @@ class ReinforceCriterion(nn.Module):
         :param seq: (batch_size, 5, seq_length)
         :param seq_log_probs: (batch_size, 5, seq_length)
         :param baseline: (batch_size, 5, seq_length)
-        :param indexes: (batch_size,)
+        :param indexes: (batch_size,) 为故事的索引
         :param rewards: (batch_size, 5, seq_length)
         :return:
         '''
         if rewards is None:
-            # compute the reward
-            sents = utils.decode_story(self.dataset.get_vocab(), seq)
-
+            sents = utils.decode_story(self.dataset.get_vocab(), seq) # 将 id 转为 word
             rewards = []
             batch_size = seq.size(0)
-            for i, story in enumerate(sents):
+            for i, story in enumerate(sents): # sents 是一个故事一句话
                 vid, _ = self.dataset.get_id(index[i])
                 GT_story = self.dataset.get_GT(index[i])
                 result = {vid: [story]}
@@ -84,7 +82,6 @@ class ReinforceCriterion(nn.Module):
         else:
             avg_reward = rewards.mean()
             rewards = rewards.view(-1, 5, 1)
-
         # get the mask
         mask = (seq > 0).float()  # its size is supposed to be (batch_size, 5, seq_length)
         if mask.size(2) > 1:
@@ -92,7 +89,6 @@ class ReinforceCriterion(nn.Module):
         else:
             mask.fill_(1)
         mask = Variable(mask)
-
         # compute the loss
         advantage = Variable(rewards.data - baseline.data)
         value_loss = self._cal_value_loss(rewards, baseline, mask)
@@ -107,19 +103,20 @@ class LanguageModelCriterion(nn.Module):
         super(LanguageModelCriterion, self).__init__()
 
     def forward(self, input, target, weights=None, compute_prob=False):
+        # input 64*5*30*9837；target 64*5*30
+        # 计算损失
         if len(target.size()) == 3:  # separate story
             input = input.view(-1, input.size(2), input.size(3))
             target = target.view(-1, target.size(2))
-
         seq_length = input.size(1)
         # truncate to the same size
         target = target[:, :input.size(1)]
-        mask = (target > 0).float()
+        mask = (target > 0).float() # 获取mask矩阵，target值>0的=1，其余为0，mask 320*30
         mask = to_contiguous(torch.cat([Variable(mask.data.new(mask.size(0), 1).fill_(1)), mask[:, :-1]], 1))
 
         # reshape the variables
-        input = to_contiguous(input).view(-1, input.size(2))
-        target = to_contiguous(target).view(-1, 1)
+        input = to_contiguous(input).view(-1, input.size(2)) # 9600*9387
+        target = to_contiguous(target).view(-1, 1) #9600*1
         mask = mask.view(-1, 1)
 
         if weights is None:
