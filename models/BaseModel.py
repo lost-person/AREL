@@ -128,6 +128,7 @@ class BaseModel(nn.Module):
             out_caption, enc_state = self.caption_encoder(caption, self.embed) # 320*20*512
         # 对图像特征编码
         out_e, _ = self.encoder(features) # out_e：64*5*512
+        out_e = out_e.contiguous()
         out_e = out_e.view(-1, out_e.size(2)) # 320*512
         story_t = story_t.view(-1, story_t.size(2)) # 320*30
         batch_size = out_e.size(0) #320
@@ -172,18 +173,25 @@ class BaseModel(nn.Module):
             return self.sample(features, sample_max=True, rl_training=False)
         
         out_e, _ = self.encoder(features) # encode the visual features 64*5*512
+        out_e = out_e.contiguous()
         out_e = out_e.view(-1, out_e.size(2)) # 320*512
         if self.opt.caption:
             out_caption, enc_state = self.caption_encoder(caption, self.embed) # 320*20*512   
         batch_size = out_e.size(0)
         state_d = self.init_hidden_with_feature(features) # 1*320*512
-
+        # 记录最终结果
         seq = torch.LongTensor(self.seq_length, batch_size).zero_() # 30*320
         seq_log_probs = torch.FloatTensor(self.seq_length, batch_size)
 
+        window = self.opt.window
         # 一句话一句话的处理
         for k in range(batch_size):
-            # 重复beamsize次
+            # beamsize作为batchsize进行后续处理 # 
+            num = k % 5 # 记录处理到哪一句
+            if num != 0: # 记录一个story的生成历史        
+                his = seq[:, k-num:k]
+                his_mask = his > 0
+                his_len = his_mask.sum(dim=0)
             out_e_k = out_e[k].unsqueeze(0).expand(beam_size, out_e.size(1)).contiguous() #3*512
             state_d_k = state_d[:, k, :].unsqueeze(1).expand(state_d.size(0), beam_size, state_d.size(2)).contiguous()#1*3*512
             out_caption_k = None
@@ -209,14 +217,27 @@ class BaseModel(nn.Module):
                 next_costs = (all_costs[-1, :, None] + neg_log_probs.data.cpu().numpy() * all_masks[-1, :, None]) # 计算cost，all_mask一个数乘以前面一行，3*9837
                 (finished,) = np.where(all_masks[-1] == 0) # 找出最后一行为0的位置，finished记录了所有mask为0的索引
                 next_costs[finished, 1:] = np.inf # 如果已经结束，则除了结束符外的cost设置为无穷大
+                # if 
                 # 返回当前最小的三个概率值chosen_costs，以及outputs为选择的词表中的词位置，indexes为哪一个维度
                 (indexes, outputs), chosen_costs = _smallest(next_costs, beam_size, only_first_row=i == 0)
 
                 new_state_d = state_d_k.data.cpu().numpy()[:, indexes, :] # 1*3*512 需要根据index的维度信息取state
 
-                all_outputs = all_outputs[:, indexes]
+                all_outputs = all_outputs[:, indexes] # [len,beam]
                 all_masks = all_masks[:, indexes]
                 all_costs = all_costs[:, indexes]
+                if i >= window and num != 0:
+                    current = all_outputs[-1]
+                    current_window = torch.tensor(all_outputs[-window:]) # [4,beam]
+                    for j,cur in enumerate(current):
+                        if cur != 0: # 当前句子还未生成结束
+                            index = np.where(his == cur) # 返回二维坐标
+                            if len(index[0]) != 0: # 有相同值，则遍历
+                                for i in range(len(index[0])):
+                                    if index[0][i] >= window: # 获取句子位置，长度大于window才进行比较
+                                        tmp = his[index[0][i]+1-window:index[0][i]+1, index[1][i]]
+                                        if torch.equal(tmp, current_window[:, j]):
+                                            chosen_costs[j] = np.inf
                 # 记录处理过的lastword和state
                 last_word = Variable(torch.from_numpy(outputs)).cuda()
                 state_d_k = Variable(torch.from_numpy(new_state_d)).cuda()

@@ -54,7 +54,7 @@ class VisualEncoder(nn.Module):
         self.dropout = opt.visual_dropout # 0.2
         self.story_size = opt.story_size # 5
         self.with_position = opt.with_position # False
-
+        self.opt = opt
         # visual embedding layer
         self.visual_emb = nn.Sequential(nn.Linear(self.feat_size, self.embed_dim),
                                         nn.BatchNorm1d(self.embed_dim),
@@ -70,6 +70,10 @@ class VisualEncoder(nn.Module):
         else:
             raise Exception("RNN type is not supported: {}".format(self.rnn_type))
 
+        if self.opt.context_dec:
+            self.rnn_dec = nn.LSTM(input_size=self.embed_dim, hidden_size=self.hidden_dim,
+                                 dropout=self.dropout, batch_first=True, bidirectional=True)
+            self.linear_fun = nn.Linear(self.hidden_dim * 2 + self.embed_dim, self.embed_dim)
         self.project_layer = nn.Linear(self.hidden_dim * 2, self.embed_dim)
         self.relu = nn.ReLU()
         if self.with_position: # 是否可以改为transformer那样的position
@@ -102,6 +106,10 @@ class VisualEncoder(nn.Module):
             for i in range(self.story_size):
                 position = torch.tensor(input.data.new(batch_size).long().fill_(i))
                 out[:, i, :] = out[:, i, :] + self.position_embed(position)
+        if self.opt.context_dec:
+            out, hidden = self.rnn_dec(out)
+            out = torch.cat((emb,out), 2)
+            out = self.linear_fun(out)
 
         return out, hidden
 
@@ -200,6 +208,6 @@ class CaptionEncoder(nn.Module):
             # 排列为之前的顺序
             _, ind = torch.sort(indices)
             outputs = torch.index_select(outputs, dim=0, index=ind) # batch*5,seq_len,512
-            state = torch.index_select(state.squeeze(), dim=0, index=ind)
+            state = torch.index_select(state[0].squeeze(), dim=0, index=ind)
 
         return outputs, state

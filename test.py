@@ -15,5 +15,5 @@ all_masks = numpy.array([[0,1,0]])
 (finished,) = numpy.where(all_masks[-1] == 0) 
 print(finished)
 
-a = "dsfbhkjdsef"
-print(a.encode())
+a = [1,4,3,7]
+print(a[4-2:4])

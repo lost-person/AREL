@@ -29,6 +29,13 @@ for i, data in enumerate([train_data, val_data, test_data]):
                 album2im[im['album_id']].append(im['id'])
     whole_album2im[prefix[i]] = album2im
 
+for i, data in enumerate([train_data, val_data, test_data]):
+    a = [] # 按照album存储图像数据，键为album_id，值为img_id，1-多
+    for im in data['images']: # 遍历每一张图像
+        if im['id'] not in a: # 以album区分，若album_id并未存储，则为新的album
+            a.append(im['id'])
+    print(len(a))
+
 ### 处理文本数据
 whole_album = {}
 story_lines = {} # 存储每个故事，每个故事五句话，index为0、5、10
@@ -173,7 +180,7 @@ for pre in prefix:
 """
 处理文本数据，提取出caption
 """
-base_path = "../../VIST/dii"
+base_path = "AREL-data-process/dii/"
 train_data = json.load(open(osp.join(base_path, "train.description-in-isolation.json")))
 val_data = json.load(open(osp.join(base_path, "val.description-in-isolation.json")))
 test_data = json.load(open(osp.join(base_path, "test.description-in-isolation.json")))
@@ -211,6 +218,14 @@ for i, data in enumerate([train_data, val_data, test_data]):
                 unknown_words += 1
             total_words += 1
         text_list.append(s)
+for pre in prefix:
+    count = 0
+    for i in mapping[pre]:
+        value = mapping[pre][i]
+        if len(value['caption']) == 0:
+            count += 1
+    print(count)
+
 print("unknown words percent is {}".format(unknown_words / (total_words + 0.0)))
 new_text_list = []
 specify_longest = 20
@@ -259,47 +274,47 @@ f = open("story_line.json", 'r')
 data = json.load(f)
 print(len(data['id2words']))
 
-zero_fc = numpy.zeros((2048, ), "float32")
-zero_conv = numpy.zeros((2048, 7, 7), "float32")
+# zero_fc = numpy.zeros((2048, ), "float32")
+# zero_conv = numpy.zeros((2048, 7, 7), "float32")
 
-train_fc_base = "/mnt/sshd/xwang/VIST/feature/train/fc"
-train_conv_base = "/mnt/sshd/xwang/VIST/feature/train/conv"
-train_name1 = [l.split(".")[0] for l in os.listdir(train_fc_base)]
+# train_fc_base = "/mnt/sshd/xwang/VIST/feature/train/fc"
+# train_conv_base = "/mnt/sshd/xwang/VIST/feature/train/conv"
+# train_name1 = [l.split(".")[0] for l in os.listdir(train_fc_base)]
 
-train_image_base = "/mnt/sshd/wenhuchen/VIST/images/train"
-train_name2 = [l.split(".")[0] for l in os.listdir(train_image_base)]
+# train_image_base = "/mnt/sshd/wenhuchen/VIST/images/train"
+# train_name2 = [l.split(".")[0] for l in os.listdir(train_image_base)]
 
-rest = set(train_name2) - set(train_name1)
-for image in rest:
-    numpy.save(os.path.join(train_fc_base, "{}.npy".format(image)), zero_fc) 
-    numpy.save(os.path.join(train_conv_base, "{}.npy".format(image)), zero_conv) 
+# rest = set(train_name2) - set(train_name1)
+# for image in rest:
+#     numpy.save(os.path.join(train_fc_base, "{}.npy".format(image)), zero_fc) 
+#     numpy.save(os.path.join(train_conv_base, "{}.npy".format(image)), zero_conv) 
 
-val_fc_base = "/mnt/sshd/xwang/VIST/feature/val/fc"
-val_conv_base = "/mnt/sshd/xwang/VIST/feature/val/conv"
-val_name1 = [l.split(".")[0] for l in os.listdir(val_fc_base)]
+# val_fc_base = "/mnt/sshd/xwang/VIST/feature/val/fc"
+# val_conv_base = "/mnt/sshd/xwang/VIST/feature/val/conv"
+# val_name1 = [l.split(".")[0] for l in os.listdir(val_fc_base)]
 
-val_image_base = "/mnt/sshd/wenhuchen/VIST/images/val"
-val_name2 = [l.split(".")[0] for l in os.listdir(val_image_base)]
+# val_image_base = "/mnt/sshd/wenhuchen/VIST/images/val"
+# val_name2 = [l.split(".")[0] for l in os.listdir(val_image_base)]
 
-rest = set(val_name2) - set(val_name1)
-for image in rest:
-    numpy.save(os.path.join(val_fc_base, "{}.npy".format(image)), zero_fc) 
-    numpy.save(os.path.join(val_conv_base, "{}.npy".format(image)), zero_conv) 
+# rest = set(val_name2) - set(val_name1)
+# for image in rest:
+#     numpy.save(os.path.join(val_fc_base, "{}.npy".format(image)), zero_fc) 
+#     numpy.save(os.path.join(val_conv_base, "{}.npy".format(image)), zero_conv) 
 
-test_fc_base = "/mnt/sshd/xwang/VIST/feature/test/fc"
-test_conv_base = "/mnt/sshd/xwang/VIST/feature/test/conv"
-test_name1 = [l.split(".")[0] for l in os.listdir(test_fc_base)]
+# test_fc_base = "/mnt/sshd/xwang/VIST/feature/test/fc"
+# test_conv_base = "/mnt/sshd/xwang/VIST/feature/test/conv"
+# test_name1 = [l.split(".")[0] for l in os.listdir(test_fc_base)]
 
-test_image_base = "/mnt/sshd/wenhuchen/VIST/images/test"
-test_name2 = [l.split(".")[0] for l in os.listdir(test_image_base)]
+# test_image_base = "/mnt/sshd/wenhuchen/VIST/images/test"
+# test_name2 = [l.split(".")[0] for l in os.listdir(test_image_base)]
 
-rest = set(test_name2) - set(test_name1)
-for image in rest:
-    numpy.save(os.path.join(test_fc_base, "{}.npy".format(image)), zero_fc) 
-    numpy.save(os.path.join(test_conv_base, "{}.npy".format(image)), zero_conv) 
+# rest = set(test_name2) - set(test_name1)
+# for image in rest:
+#     numpy.save(os.path.join(test_fc_base, "{}.npy".format(image)), zero_fc) 
+#     numpy.save(os.path.join(test_conv_base, "{}.npy".format(image)), zero_conv) 
 
-with open("story_line.json", 'r') as f: 
-    data = json.load(f)
+# with open("story_line.json", 'r') as f: 
+#     data = json.load(f)
 
-print(len(data['image2caption']['train']))
-print(len(data['train']))
+# print(len(data['image2caption']['train']))
+# print(len(data['train']))

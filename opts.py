@@ -6,12 +6,17 @@ def parse_opt():
     parser = argparse.ArgumentParser()
     parser.add_argument('--GPU_ids', type=int, default=0)
     # caption相关
-    parser.add_argument('--caption', type=bool, default=True)
+    parser.add_argument('--caption', type=bool, default=False)
     parser.add_argument('--cnn_cap', type=bool, default=False)
-    parser.add_argument('--self_att', type=bool, default=True)
-    parser.add_argument('--use_state', type=bool, default=True)
+    parser.add_argument('--self_att', type=bool, default=False)
+    parser.add_argument('--use_state', type=bool, default=False)
     parser.add_argument('--bi', type=bool, default=False)
+    parser.add_argument('--context_dec', type=bool, default=False)
 
+    # album
+    parser.add_argument('--window', type=int, default=5)
+    parser.add_argument('--beam_size', type=int, default=10,
+                        help='indicates number of beams in beam search. This is only used in the evaluation mode')
     parser.add_argument('--debug', type=bool, default=False)
     parser.add_argument('--option', type=str, default='train', help='train | test')
     parser.add_argument('--id', type=str, default='test', help='an id identifying this run/job')
@@ -61,8 +66,7 @@ def parse_opt():
                         help='strength of dropout in the Language Model RNN')
     parser.add_argument('--dropout', type=float, default=0.5,
                         help='strength of dropout in the Language Model RNN')
-    parser.add_argument('--beam_size', type=int, default=3,
-                        help='indicates number of beams in beam search. This is only used in the evaluation mode')
+
 
     # Optimization: for the Language Model
     parser.add_argument('--optim', type=str, default='Adam',

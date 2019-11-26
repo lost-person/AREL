@@ -53,7 +53,7 @@ def setup_optimizer(opt, model):
         raise Exception("Unknown optimizer: {}".format(opt.optim))
 
     # Load the optimizer
-    if opt.resume_from is not None:
+    if opt.resume_from is not None and opt.model == 'BaseModel':
         optim_path = os.path.join(opt.resume_from, "optimizer.pth")
         if os.path.isfile(optim_path):
             logging.info("Load optimizer from {}".format(optim_path))
@@ -188,20 +188,26 @@ def test(opt):
 if __name__ == "__main__":
 
     opt = opts.parse_opt()
-    opt.GPU_ids = 1
+    opt.GPU_ids = 0
     # 设置 GPU id
     torch.cuda.set_device(opt.GPU_ids)
     opt.batch_size = 64
-    opt.save_checkpoint_every = 5
-    opt.caption = True
-    opt.story_line_json = './story_line.json'
+    opt.save_checkpoint_every = 1000
+    opt.caption = False
+    opt.story_line_json = 'VIST/story_line.json'
     opt.self_att = False
     opt.cnn_cap = False
+    opt.bi = False
+
+    opt.context_dec = False
     opt.option = 'test'
+    opt.id = 'baseline'
     # 训练模式还是测试模式
     if opt.option == 'train':
         print('Begin training:')
         train(opt)
     else:
+        opt.resume_from = './data/save/' + opt.id + '/'
+        print(opt.resume_from)
         print('Begin testing:')
         test(opt)

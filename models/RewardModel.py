@@ -1,7 +1,3 @@
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -47,8 +43,9 @@ class RewardModel(nn.Module):
             self.activation = nn.Tanh()
 
     def forward(self, story, feature):
+        # 传入 target[320,30] 和 图像 feature[320,2048]
+        # 载入basemodel的emb
         embedding = Variable(self.emb(story).data)  # (batch_size, seq_length, embed_dim)
-
         self.convs = [model.cuda() for model in self.convs]
 
         # batch x seq_len x emb_dim -> batch x 1 x seq_len x emb_dim
@@ -62,5 +59,5 @@ class RewardModel(nn.Module):
         combined = torch.cat([x, img], 1)
         combined = self.dropout(combined)
 
-        prob = self.fc(combined).view(-1)
+        prob = self.fc(combined).view(-1) # 320
         return self.activation(prob)
