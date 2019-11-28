@@ -73,7 +73,7 @@ class VisualEncoder(nn.Module):
         if self.opt.context_dec:
             self.rnn_dec = nn.LSTM(input_size=self.embed_dim, hidden_size=self.hidden_dim,
                                  dropout=self.dropout, batch_first=True, bidirectional=True)
-            self.linear_fun = nn.Linear(self.hidden_dim * 2 + self.embed_dim, self.embed_dim)
+            # self.linear_fun = nn.Linear(self.hidden_dim * 2 + self.embed_dim, self.embed_dim)
         self.project_layer = nn.Linear(self.hidden_dim * 2, self.embed_dim)
         self.relu = nn.ReLU()
         if self.with_position: # 是否可以改为transformer那样的position
@@ -106,10 +106,11 @@ class VisualEncoder(nn.Module):
             for i in range(self.story_size):
                 position = torch.tensor(input.data.new(batch_size).long().fill_(i))
                 out[:, i, :] = out[:, i, :] + self.position_embed(position)
+        
         if self.opt.context_dec:
             out, hidden = self.rnn_dec(out)
-            out = torch.cat((emb,out), 2)
-            out = self.linear_fun(out)
+            # out = torch.cat((emb,out), 2)
+            # out = self.linear_fun(out)
 
         return out, hidden
 
@@ -211,3 +212,54 @@ class CaptionEncoder(nn.Module):
             state = torch.index_select(state[0].squeeze(), dim=0, index=ind)
 
         return outputs, state
+
+
+def graph_attn(alpha, cen_state, adj_state, M, max_len):
+    """
+    graph attention. calculate the graph attention score for cen_state
+
+    Args:
+        alpha: float hyper parameters
+        cen_state: tensor acts as central node batch_size * 1 * hidden_dim
+        other_state: tensor acts as adjacent node batch_size * max_len * hidden_dim
+        M: tensor learned param matrix hidden_dim * hidden_dim
+        max_len: int maximum number of adjacent node
+    Returns:
+        socre: tensor batch_size * max_len
+    """
+    batch_size = cen_state.shape[0]
+    # concatenate 将解码节点与编码节点拼接，构成图
+    state = torch.cat((cen_state, adj_state), dim=1) # batch_size * max_len + 1 * hidden_dim
+    
+    W = torch.matmul(state, M) # batch_size * max_len + 1 * hidden_dim
+    W = torch.matmul(W, state.permute(0, 2, 1)) # batch_size * max_len + 1 * max_len + 1
+    
+    W_sum = torch.sum(W, dim=2) # batch_size * max_len + 1
+    W_sum = torch.unsqueeze(W_sum, -1) # batch_size * max_len + 1 * 1
+    W_sum = W_sum.repeat((1, 1, max_len + 1)) # batch_size * max_len + 1 * max_len + 1
+    
+    D = torch.eye(max_len + 1) # max_len + 1 * max_len + 1
+    D = torch.unsqueeze(D, 0) # 1 * max_len + 1 * max_len + 1
+    D = D.repeat((batch_size, 1, 1)) * W_sum # batch_size * max_len + 1 * max_len + 1
+    P = alpha * torch.matmul(W, torch.inverse(D[:])) # batch_size * max_len + 1 * max_len + 1
+
+    I = torch.unsqueeze(torch.eye(max_len + 1), 0) # 1 * max_len + 1 * max_len + 1
+    I = I.repeat(batch_size, 1, 1) - P # batch_size * max_len + 1 * max_len + 1
+    Q = torch.inverse(I[:]) # batch_size * max_len + 1 * max_len + 1
+    
+    Y = torch.cat((torch.ones((batch_size, 1)), torch.zeros(batch_size, max_len)), 1) # batch_size * max_len + 1
+    Y = torch.unsqueeze(Y, -1)
+    score = (1 - alpha) * torch.matmul(Q, Y)
+    score = torch.squeeze(score, -1)
+    return score[:, 1:]
+
+
+if __name__ == "__main__":
+    alpha = 0.9
+    batch_size = 64
+    max_len = 5
+    hidden_dim = 512
+    cen_state = torch.randn((batch_size, 1, hidden_dim))
+    adj_state = torch.randn((batch_size, max_len, hidden_dim))
+    M = torch.randn((hidden_dim, hidden_dim))
+    graph_attn(alpha, cen_state, adj_state, M, max_len)
