@@ -199,9 +199,10 @@ if __name__ == "__main__":
     opt.cnn_cap = False
     opt.bi = False
 
-    opt.context_dec = False
+    opt.context_dec = True
     opt.option = 'test'
-    opt.id = 'baseline'
+    opt.id="lstm_dec"
+
     # 训练模式还是测试模式
     if opt.option == 'train':
         print('Begin training:')

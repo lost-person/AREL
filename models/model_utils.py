@@ -108,6 +108,10 @@ class VisualEncoder(nn.Module):
                 out[:, i, :] = out[:, i, :] + self.position_embed(position)
         
         if self.opt.context_dec:
+            # for i in range(batch_size):
+            #     input_vex = out[i, :, :]
+                
+            #     out, hidden = self.rnn_dec(out[i, :, :])
             out, hidden = self.rnn_dec(out)
             # out = torch.cat((emb,out), 2)
             # out = self.linear_fun(out)
