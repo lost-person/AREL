@@ -188,10 +188,21 @@ class BaseModel(nn.Module):
         for k in range(batch_size):
             # beamsize作为batchsize进行后续处理 # 
             num = k % 5 # 记录处理到哪一句
-            if num != 0: # 记录一个story的生成历史        
-                his = seq[:, k-num:k]
-                his_mask = his > 0
-                his_len = his_mask.sum(dim=0)
+            # his_set = set()
+            if num == 0:
+                bag = np.zeros(self.vocab_size, int)
+            else:
+                his = seq[:, k-1].view(-1)
+                for h in his:
+                    if h > 2:
+                        bag[h] += 1
+            # if num != 0: # 记录一个story的生成历史        
+            #     his = seq[:, k-num:k]
+            #     his_mask = his > 0
+            #     his_len = his_mask.sum(dim=0)
+            #     for m in range(num):
+            #         for n in range(his_len[m]-window+1):
+            #             his_set.add(his[n:n+window, m])
             out_e_k = out_e[k].unsqueeze(0).expand(beam_size, out_e.size(1)).contiguous() #3*512
             state_d_k = state_d[:, k, :].unsqueeze(1).expand(state_d.size(0), beam_size, state_d.size(2)).contiguous()#1*3*512
             out_caption_k = None
@@ -215,9 +226,11 @@ class BaseModel(nn.Module):
                     break
                 # 之前的cost+概率分布*mask（mask标记是否生成结束，结束后为0，不再累计损失）
                 next_costs = (all_costs[-1, :, None] + neg_log_probs.data.cpu().numpy() * all_masks[-1, :, None]) # 计算cost，all_mask一个数乘以前面一行，3*9837
+                next_costs = next_costs[:] + bag * self.opt.scale
                 (finished,) = np.where(all_masks[-1] == 0) # 找出最后一行为0的位置，finished记录了所有mask为0的索引
+
                 next_costs[finished, 1:] = np.inf # 如果已经结束，则除了结束符外的cost设置为无穷大
-                # if 
+                
                 # 返回当前最小的三个概率值chosen_costs，以及outputs为选择的词表中的词位置，indexes为哪一个维度
                 (indexes, outputs), chosen_costs = _smallest(next_costs, beam_size, only_first_row=i == 0)
 
@@ -226,18 +239,26 @@ class BaseModel(nn.Module):
                 all_outputs = all_outputs[:, indexes] # [len,beam]
                 all_masks = all_masks[:, indexes]
                 all_costs = all_costs[:, indexes]
-                if i >= window and num != 0:
-                    current = all_outputs[-1]
-                    current_window = torch.tensor(all_outputs[-window:]) # [4,beam]
-                    for j,cur in enumerate(current):
-                        if cur != 0: # 当前句子还未生成结束
-                            index = np.where(his == cur) # 返回二维坐标
-                            if len(index[0]) != 0: # 有相同值，则遍历
-                                for i in range(len(index[0])):
-                                    if index[0][i] >= window: # 获取句子位置，长度大于window才进行比较
-                                        tmp = his[index[0][i]+1-window:index[0][i]+1, index[1][i]]
-                                        if torch.equal(tmp, current_window[:, j]):
-                                            chosen_costs[j] = np.inf
+                # if i >= window and num != 0: 
+                #     current = torch.tensor(all_outputs[-window:]).transpose(0,1) # window,beam
+                #     for m, cur in enumerate(current):
+                #         if cur[-1] != 0:
+                #             for n in his_set:
+                #                 if torch.equal(n, cur):
+                #                     chosen_costs[m] += 1
+                #                     break
+                # if i >= window and num != 0:
+                #     current = all_outputs[-1]
+                #     current_window = torch.tensor(all_outputs[-window:]) # [4,beam]
+                #     for j,cur in enumerate(current):
+                #         if cur != 0: # 当前句子还未生成结束
+                #             index = np.where(his == cur) # 返回二维坐标
+                #             if len(index[0]) != 0: # 有相同值，则遍历
+                #                 for i in range(len(index[0])):
+                #                     if index[0][i] >= window: # 获取句子位置，长度大于window才进行比较
+                #                         tmp = his[index[0][i]+1-window:index[0][i]+1, index[1][i]]
+                #                         if torch.equal(tmp, current_window[:, j]):
+                #                             chosen_costs[j] = np.inf
                 # 记录处理过的lastword和state
                 last_word = Variable(torch.from_numpy(outputs)).cuda()
                 state_d_k = Variable(torch.from_numpy(new_state_d)).cuda()
@@ -257,10 +278,14 @@ class BaseModel(nn.Module):
                 all_masks = np.vstack([all_masks, mask[None, :]])
 
             all_outputs = all_outputs[1:]
-            all_costs = all_costs[1:] - all_costs[:-1]
+            
             all_masks = all_masks[:-1]
-            costs = all_costs.sum(axis=0)
+            # costs = all_costs.sum(axis=0)
             lengths = all_masks.sum(axis=0)
+            costs = 0
+            for i, len in enumerate(lengths):
+                costs += all_costs[int(len-1)][i]
+            all_costs = all_costs[1:] - all_costs[:-1]
             normalized_cost = costs / lengths
             best_idx = np.argmin(normalized_cost)
             seq[:all_outputs.shape[0], k] = torch.from_numpy(all_outputs[:, best_idx])

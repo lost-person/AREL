@@ -14,12 +14,13 @@ def parse_opt():
     parser.add_argument('--context_dec', type=bool, default=False)
 
     # album
-    parser.add_argument('--window', type=int, default=5)
-    parser.add_argument('--beam_size', type=int, default=10,
+    parser.add_argument('--window', type=int, default=4)
+    parser.add_argument('--beam_size', type=int, default=3,
                         help='indicates number of beams in beam search. This is only used in the evaluation mode')
     parser.add_argument('--debug', type=bool, default=False)
     parser.add_argument('--option', type=str, default='train', help='train | test')
     parser.add_argument('--id', type=str, default='test', help='an id identifying this run/job')
+    parser.add_argument('--scale', type=float, default=0.2, help='prevent the repeat in beam search')
 
     # Data input settings
     parser.add_argument('--data_dir', type=str, default='./VIST')
