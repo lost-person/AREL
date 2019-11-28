@@ -72,8 +72,8 @@ class VisualEncoder(nn.Module):
 
         if self.opt.context_dec:
             self.rnn_dec = nn.LSTM(input_size=self.embed_dim, hidden_size=self.hidden_dim,
-                                 dropout=self.dropout, batch_first=True, bidirectional=True)
-            # self.linear_fun = nn.Linear(self.hidden_dim * 2 + self.embed_dim, self.embed_dim)
+                                 dropout=self.dropout, batch_first=True, bidirectional=False)
+            # self.linear_fun = nn.Linear(self.hidden_dim, self.embed_dim)
         self.project_layer = nn.Linear(self.hidden_dim * 2, self.embed_dim)
         self.relu = nn.ReLU()
         if self.with_position: # 是否可以改为transformer那样的position
