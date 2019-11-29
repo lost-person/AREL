@@ -200,8 +200,7 @@ if __name__ == "__main__":
     opt.bi = False
 
     opt.context_dec = True
-    opt.option = 'test'
-    opt.id="lstm_dec"
+    opt.option = 'train'
 
     # 训练模式还是测试模式
     if opt.option == 'train':

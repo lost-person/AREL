@@ -21,6 +21,7 @@ def parse_opt():
     parser.add_argument('--option', type=str, default='train', help='train | test')
     parser.add_argument('--id', type=str, default='test', help='an id identifying this run/job')
     parser.add_argument('--scale', type=float, default=0.2, help='prevent the repeat in beam search')
+    parser.add_argument('--alpha', type=float, default=0.2, help='prevent the repeat in beam search')
 
     # Data input settings
     parser.add_argument('--data_dir', type=str, default='./VIST')
