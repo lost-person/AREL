@@ -127,7 +127,7 @@ class BaseModel(nn.Module):
         if self.opt.caption: # 引入caption
             out_caption, enc_state = self.caption_encoder(caption, self.embed) # 320*20*512
         # 对图像特征编码
-        out_e, _ = self.encoder(features) # out_e：64*5*512
+        out_e, enc_state = self.encoder(features) # out_e：64*5*512
         out_e = out_e.contiguous()
         out_e = out_e.view(-1, out_e.size(2)) # 320*512
         story_t = story_t.view(-1, story_t.size(2)) # 320*30
@@ -172,7 +172,7 @@ class BaseModel(nn.Module):
         if beam_size == 1:  # if beam_size is 1, then do greedy decoding, otherwise use beam search
             return self.sample(features, sample_max=True, rl_training=False)
         
-        out_e, _ = self.encoder(features) # encode the visual features 64*5*512
+        out_e, enc_state = self.encoder(features) # encode the visual features 64*5*512
         out_e = out_e.contiguous()
         out_e = out_e.view(-1, out_e.size(2)) # 320*512
         if self.opt.caption:
@@ -183,7 +183,7 @@ class BaseModel(nn.Module):
         seq = torch.LongTensor(self.seq_length, batch_size).zero_() # 30*320
         seq_log_probs = torch.FloatTensor(self.seq_length, batch_size)
 
-        window = self.opt.window
+        # window = self.opt.window
         # 一句话一句话的处理
         for k in range(batch_size):
             # beamsize作为batchsize进行后续处理 # 

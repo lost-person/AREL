@@ -12,6 +12,7 @@ def parse_opt():
     parser.add_argument('--use_state', type=bool, default=False)
     parser.add_argument('--bi', type=bool, default=False)
     parser.add_argument('--context_dec', type=bool, default=False)
+    parser.add_argument('--trick', type=bool, default=False)
 
     # album
     parser.add_argument('--window', type=int, default=4)
@@ -21,6 +22,7 @@ def parse_opt():
     parser.add_argument('--option', type=str, default='train', help='train | test')
     parser.add_argument('--id', type=str, default='test', help='an id identifying this run/job')
     parser.add_argument('--scale', type=float, default=0.2, help='prevent the repeat in beam search')
+    parser.add_argument('--alpha', type=float, default=0.4, help='prevent the repeat in beam search')
 
     # Data input settings
     parser.add_argument('--data_dir', type=str, default='./VIST')
@@ -114,7 +116,7 @@ def parse_opt():
                         help="XE | CIDEr | ROUGE_L | METEOR | Bleu_4 | Bleu_3")
     parser.add_argument('--save_checkpoint_every', type=int, default=1000,
                         help='how often to save a model checkpoint (in iterations)')
-    parser.add_argument('--checkpoint_path', type=str, default='data/save',
+    parser.add_argument('--checkpoint_path', type=str, default='data/',
                         help='directory to store checkpointed models')
     parser.add_argument('--losses_log_every', type=int, default=10,
                         help='How often do we snapshot losses, for inclusion in the progress dump? (0 = disable)')

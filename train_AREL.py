@@ -59,8 +59,9 @@ def train(opt):
     opt.vocab_size = dataset.get_vocab_size()
     opt.seq_length = dataset.get_story_length()
     dataset.set_option(data_type={'whole_story': False, 'split_story': True, 'caption': False})
-
+    dataset.train()
     train_loader = DataLoader(dataset, batch_size=opt.batch_size, shuffle=opt.shuffle)
+    dataset.val()
     val_loader = DataLoader(dataset, batch_size=opt.batch_size, shuffle=False)
     bad_valid = 0
 

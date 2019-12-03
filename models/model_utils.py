@@ -29,6 +29,53 @@ class AttentionLayer(nn.Module):
 
         return a
 
+def graph_attn(alpha, cen_state, adj_state, max_len, last):
+    """
+    graph attention. calculate the graph attention score for cen_state
+    Args:
+        alpha: float hyper parameters
+        cen_state: tensor acts as central node batch_size * 1 * hidden_dim
+        other_state: tensor acts as adjacent node batch_size * max_len * hidden_dim
+        M: tensor learned param matrix hidden_dim * hidden_dim
+        max_len: int maximum number of adjacent node
+    Returns:
+        socre: tensor batch_size * max_len
+    """
+    batch_size = cen_state.shape[0]
+    hidden_dim = cen_state.shape[-1]
+    # concatenate 将解码节点与编码节点拼接，构成图
+    state = torch.cat((cen_state, adj_state), dim=1) # batch_size * max_len + 1 * hidden_dim
+    
+    M = nn.Linear(hidden_dim, hidden_dim).cuda() 
+    W = M(state) # batch_size * max_len + 1 * hidden_dim
+    W = torch.matmul(state, W.transpose(1, 2)) # batch_size * max_len + 1 * max_len + 1
+    
+    W_sum = torch.sum(W, dim=2) # batch_size * max_len + 1
+    W_sum = torch.unsqueeze(W_sum, -1) # batch_size * max_len + 1 * 1
+    W_sum = W_sum.repeat((1, 1, max_len + 1)) # batch_size * max_len + 1 * max_len + 1
+    
+    D = torch.eye(max_len + 1).cuda() # max_len + 1 * max_len + 1
+    D = torch.unsqueeze(D, 0) # 1 * max_len + 1 * max_len + 1
+    D = D.repeat((batch_size, 1, 1)) * W_sum # batch_size * max_len + 1 * max_len + 1 点乘
+    P = alpha * torch.matmul(W, torch.inverse(D[:])) # batch_size * max_len + 1 * max_len + 1
+
+    I = torch.unsqueeze(torch.eye(max_len + 1), 0).cuda() # 1 * max_len + 1 * max_len + 1
+    I = I.repeat(batch_size, 1, 1) - P # batch_size * max_len + 1 * max_len + 1
+    Q = torch.inverse(I[:]) # batch_size * max_len + 1 * max_len + 1
+    
+    Y = torch.cat((torch.ones((batch_size, 1)), torch.zeros(batch_size, max_len)), 1).cuda() # batch_size * max_len + 1
+    Y = torch.unsqueeze(Y, -1)
+    score = (1 - alpha) * torch.matmul(Q, Y)
+    score = F.softmax(score, dim=1)
+    score_mask = (score.squeeze() - last) > 0
+    score_mask = score_mask.float()
+    score = (score.squeeze() - last) * score_mask
+    score_sum = score.sum(1).unsqueeze(1)
+    score = score[:] / score_sum[:]
+    state = torch.matmul(state.transpose(1, 2), score.unsqueeze(2)) # 64*512*1
+
+    return score, state
+
 def _smallest(matrix, k, only_first_row=False):
     # matrix ： beam*vocab（记录了到当前步骤的总cost）  k：beam
     # 选取beam个最小的
@@ -73,7 +120,11 @@ class VisualEncoder(nn.Module):
         if self.opt.context_dec:
             self.rnn_dec = nn.LSTM(input_size=self.embed_dim, hidden_size=self.hidden_dim,
                                  dropout=self.dropout, batch_first=True, bidirectional=False)
-            # self.linear_fun = nn.Linear(self.hidden_dim, self.embed_dim)
+            # self.linear_fun = nn.Sequential(nn.Linear(self.hidden_dim * 2, self.hidden_dim),
+            #                             nn.BatchNorm1d(self.hidden_dim),
+            #                             nn.ReLU(True))
+            self.linear_fun = nn.Sequential(nn.Linear(self.hidden_dim, self.hidden_dim), nn.Sigmoid())
+            self.linear_mem = nn.Linear(self.hidden_dim * 2, self.hidden_dim)
         self.project_layer = nn.Linear(self.hidden_dim * 2, self.embed_dim)
         self.relu = nn.ReLU()
         if self.with_position: # 是否可以改为transformer那样的position
@@ -97,7 +148,7 @@ class VisualEncoder(nn.Module):
         rnn_input = self.hin_dropout_layer(emb)  # apply dropout
         # if hidden is None:
         #     hidden = self.init_hidden(batch_size, bi=True, dim=self.hidden_dim // 2) # 最后一个维度为512/2=256
-        houts, hidden = self.rnn(rnn_input)
+        houts, hidden = self.rnn(rnn_input) #  hidden [2,64,512]
         
         out = emb + self.project_layer(houts) # 原始的 visual_emb + rnn输出的结果, 改为concat？
         out = self.relu(out)  # (batch_size, 5, embed_dim)
@@ -108,15 +159,35 @@ class VisualEncoder(nn.Module):
                 out[:, i, :] = out[:, i, :] + self.position_embed(position)
         
         if self.opt.context_dec:
-            # for i in range(batch_size):
-            #     input_vex = out[i, :, :]
-                
-            #     out, hidden = self.rnn_dec(out[i, :, :])
-            out, hidden = self.rnn_dec(out)
-            # out = torch.cat((emb,out), 2)
-            # out = self.linear_fun(out)
-
-        return out, hidden
+            # state = (hidden[0].unsqueeze(0), hidden[1].unsqueeze(0))
+            # Mem = state[0] # 初始化 memory
+            # g = self.linear_mem()
+            # weights = []
+            # state = (hidden[0].unsqueeze(0), hidden[1].unsqueeze(0))
+            # result = []
+            # last = (torch.ones(self.story_size + 1) / (self.story_size + 1)).unsqueeze(0).repeat(batch_size, 1).cuda()
+            # for i in range(self.story_size): 
+            #     output1, state = self.rnn_dec(out[:, i, :].unsqueeze(1), state)
+            #     weights, output2 = graph_attn(self.opt.alpha, output1, out, self.story_size, last)
+            #     last = weights
+            #     output = output1.squeeze() + output2.squeeze()
+            #     # output = torch.cat([output1.squeeze(), output2.squeeze()], dim=-1)
+            #     # output = self.linear_fun(output)
+            #     result.append(output.squeeze())
+            # out = torch.stack(result).transpose(0, 1)
+            
+            state = (hidden[0].unsqueeze(0), hidden[1].unsqueeze(0))
+            mem = out.sum(dim=1) # 64*512
+            result = []
+            for i in range(self.story_size):
+                g = self.linear_fun(state[0].squeeze())
+                mem = g * mem
+                inp = torch.cat((out[:, i, :], mem), 1)
+                inp = self.linear_mem(inp).unsqueeze(1)
+                output, state = self.rnn_dec(inp, state)
+                result.append(output.squeeze())
+            out = torch.stack(result).transpose(0, 1)
+        return out, state
 
 class CaptionEncoder(nn.Module):
 

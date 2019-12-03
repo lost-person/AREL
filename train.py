@@ -77,8 +77,9 @@ def train(opt):
     opt.seq_length = dataset.get_story_length()
     # print(dataset.get_word2id()['the'])
     dataset.set_option(data_type={'whole_story': False, 'split_story': True, 'caption': True}) # 若不使用caption数据，则将其设为False
-
+    dataset.train()
     train_loader = DataLoader(dataset, batch_size=opt.batch_size, shuffle=opt.shuffle)
+    dataset.test() # 改为valid
     val_loader = DataLoader(dataset, batch_size=opt.batch_size, shuffle=False)
     # m = dataset.word2id
 
@@ -97,7 +98,7 @@ def train(opt):
     model = models.setup(opt)
     model.cuda()
     optimizer = setup_optimizer(opt, model)
-
+    dataset.train()
     model.train()
     for epoch in range(logger.epoch_start, opt.max_epochs): # 默认为 0-20
         # scheduled_sampling_start表示在第几个epoch，衰减gt使用概率，最大到0.25，5个epoch之内还是0
@@ -189,26 +190,28 @@ if __name__ == "__main__":
 
     opt = opts.parse_opt()
     opt.GPU_ids = 0
+
     # 设置 GPU id
     torch.cuda.set_device(opt.GPU_ids)
     opt.batch_size = 64
     opt.save_checkpoint_every = 1000
     opt.caption = False
-    opt.story_line_json = 'VIST/story_line.json'
+
     opt.self_att = False
     opt.cnn_cap = False
     opt.bi = False
 
     opt.context_dec = True
-    opt.option = 'test'
-    opt.id="lstm_dec"
+    opt.trick = True
+    opt.option = 'train'
+    # opt.id = 'test'
 
     # 训练模式还是测试模式
     if opt.option == 'train':
         print('Begin training:')
         train(opt)
     else:
-        opt.resume_from = './data/save/' + opt.id + '/'
+        opt.resume_from = './data/' + opt.id + '/'
         print(opt.resume_from)
         print('Begin testing:')
         test(opt)
