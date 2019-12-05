@@ -105,3 +105,34 @@ class maxout(nn.Module):
         output = output.max(2)[0]
 
         return output
+
+
+class bigru_attention(nn.Module):
+    def __init__(self, enc_dim, dec_dim, hidden_size):
+        super(bigru_attention, self).__init__()
+        self.linear_enc = nn.Linear(enc_dim, hidden_size)
+        self.linear_dec = nn.Linear(dec_dim, hidden_size)
+        self.linear_w = nn.Linear(hidden_size, 1)
+        self.enc_dim = self.enc_dim
+        self.dec_dim = self.dec_dim
+        self.hidden_size = hidden_size
+        self.activation = nn.Tanh()
+        self.softmax = nn.Softmax(dim=1)
+
+    def forward(self, enc, dec, context):
+        """
+        bahdanau attention
+
+        Args:
+            enc: tensor batch_size * seq_len * enc_dim 编码时 RNN 的全部时刻的输出
+            dec: tensor batch_size * dec_dim 解码时上一步隐藏状态
+            context: tensor batch_size * 
+        """
+        seq_len = enc.size(1)
+        enc = self.linear_enc(enc) # batch_size * seq_len * hidden_size
+        dec = self.linear_dec(dec).unsqueeze(1) # batch_size * 1 * hidden_size
+        dec = dec.repeat(1, seq_len, 1)
+        weights = self.linear_w(self.activation(enc + dec)).squeeze(2) # batch_size * seq_len
+        weights = self.softmax(weights)
+        attn_out = torch.bmm(weights.unsqueeze(1)).squeeze(1)
+        return attn_out, weights
