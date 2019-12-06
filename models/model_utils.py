@@ -123,6 +123,7 @@ class VisualEncoder(nn.Module):
             # self.linear_fun = nn.Sequential(nn.Linear(self.hidden_dim * 2, self.hidden_dim),
             #                             nn.BatchNorm1d(self.hidden_dim),
             #                             nn.ReLU(True))
+            # 线性层 + 门控
             self.linear_fun = nn.Sequential(nn.Linear(self.hidden_dim, self.hidden_dim), nn.Sigmoid())
             self.linear_mem = nn.Linear(self.hidden_dim * 2, self.hidden_dim)
         self.project_layer = nn.Linear(self.hidden_dim * 2, self.embed_dim)
@@ -150,7 +151,7 @@ class VisualEncoder(nn.Module):
         #     hidden = self.init_hidden(batch_size, bi=True, dim=self.hidden_dim // 2) # 最后一个维度为512/2=256
         houts, hidden = self.rnn(rnn_input) #  hidden [2,64,512]
         
-        out = emb + self.project_layer(houts) # 原始的 visual_emb + rnn输出的结果, 改为concat？
+        out = emb + self.project_layer(houts) # 原始的 visual_emb + rnn输出的结果, 即残差连接， 改为concat？
         out = self.relu(out)  # (batch_size, 5, embed_dim)
 
         if self.with_position:
