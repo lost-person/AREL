@@ -22,7 +22,7 @@ def parse_opt():
     parser.add_argument('--option', type=str, default='train', help='train | test')
     parser.add_argument('--id', type=str, default='test', help='an id identifying this run/job')
     parser.add_argument('--scale', type=float, default=0.2, help='prevent the repeat in beam search')
-    parser.add_argument('--alpha', type=float, default=0.4, help='prevent the repeat in beam search')
+    parser.add_argument('--alpha', type=float, default=0.2, help='prevent the repeat in beam search')
 
     # Data input settings
     parser.add_argument('--data_dir', type=str, default='./VIST')
@@ -56,7 +56,7 @@ def parse_opt():
                         help='whether to use position embedding for the image feature')
 
     # Optimization: General
-    parser.add_argument('--max_epochs', type=int, default=50,
+    parser.add_argument('--max_epochs', type=int, default=100,
                         help='number of epochs')
     parser.add_argument('--shuffle', type=bool, default=True,
                         help='set to True to have the data reshuffled at every epoch during training ')
