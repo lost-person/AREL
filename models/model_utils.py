@@ -159,10 +159,10 @@ class VisualEncoder(nn.Module):
             # 线性层 + 门控
             # self.attention = MultiHeadAttention(8, self.hidden_dim, 64, 64)
             # self.pos_ffn = PositionwiseFeedForward(self.hidden_dim, 2048)
-            # self.attention = luong_gate_attention(self.hidden_dim, self.embed_dim)
-            self.linear_read = nn.Sequential(nn.Linear(self.hidden_dim, self.hidden_dim), nn.Sigmoid())
+            self.attention = luong_gate_attention(self.hidden_dim, self.embed_dim)
+            self.linear_read = nn.Sequential(nn.Linear(self.hidden_dim * 2, self.hidden_dim), nn.Sigmoid())
             self.linear_write = nn.Sequential(nn.Linear(self.hidden_dim, self.hidden_dim), nn.Sigmoid())
-            self.linear_mem = nn.Linear(self.hidden_dim * 2, self.hidden_dim)
+            self.linear_mem = nn.Linear(self.hidden_dim * 3, self.hidden_dim)
             # self.position_enc = nn.Embedding.from_pretrained(get_sinusoid_encoding_table(self.hidden_dim), freeze=True)
         self.project_layer = nn.Linear(self.hidden_dim * 2, self.embed_dim)
         self.relu = nn.ReLU()
@@ -197,20 +197,7 @@ class VisualEncoder(nn.Module):
                 position = torch.tensor(input.data.new(batch_size).long().fill_(i))
                 out[:, i, :] = out[:, i, :] + self.position_embed(position)
         
-        if self.opt.context_dec:
-            # state = (hidden[0].unsqueeze(0), hidden[1].unsqueeze(0))
-            # result = []
-            # last = (torch.ones(self.story_size + 1) / (self.story_size + 1)).unsqueeze(0).repeat(batch_size, 1).cuda()
-            # for i in range(self.story_size): 
-            #     output1, state = self.rnn_dec(out[:, i, :].unsqueeze(1), state)
-            #     weights, output2 = graph_attn(self.opt.alpha, output1, out, self.story_size, last)
-            #     last = weights
-            #     output = output1.squeeze() + output2.squeeze()
-            #     # output = torch.cat([output1.squeeze(), output2.squeeze()], dim=-1)
-            #     # output = self.linear_fun(output)
-            #     result.append(output.squeeze())
-            # out = torch.stack(result).transpose(0, 1)
-            
+        if self.opt.context_dec:            
             state = (hidden[0].unsqueeze(0), hidden[1].unsqueeze(0))
             # self.attention.init_context(out)
             # mem, weights = self.attention(out, selfatt=True)
@@ -224,15 +211,18 @@ class VisualEncoder(nn.Module):
             mem = out
             mem = mem.sum(dim=1) # 64*512
             result = []
+            self.attention.init_context(out)
             for i in range(self.story_size):
                 # graph_res = graph_attn(self.opt.alpha, state[0].squeeze(), out, self.story_size) # 64*6*1
                 # graph_res = torch.matmul(out.transpose(1, 2), weights).squeeze()
-                g_r = self.linear_read(state[0].squeeze())
+                att, _ = self.attention(state[0].squeeze())
+                g_r = self.linear_read(torch.cat([state[0].squeeze(), att.squeeze()], dim=-1))
+                # g_r = self.linear_read(state[0].squeeze())
                 mem_inp = g_r * mem
-                inp = torch.cat((out[:, i, :], mem_inp), 1)
+                inp = torch.cat((out[:, i, :], mem_inp, att), 1)
                 inp = self.linear_mem(inp).unsqueeze(1) # 64*1*512
                 output, state = self.rnn_dec(inp, state)
-                g_w = self.linear_read(state[0].squeeze())
+                g_w = self.linear_write(state[0].squeeze())
                 mem = g_w * mem
                 result.append(output.squeeze())
             out = torch.stack(result).transpose(0, 1)
