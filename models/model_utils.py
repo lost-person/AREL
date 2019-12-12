@@ -3,8 +3,41 @@ import torch.nn as nn
 import torch.nn.functional as F
 import numpy as np
 import time
-from models.attention import luong_gate_attention
+from models.attention import luong_gate_attention, MultiHeadAttention
 
+def get_sinusoid_encoding_table(d_hid, n_position=5):
+    ''' Sinusoid position encoding table '''
+
+    def cal_angle(position, hid_idx):
+        return position / np.power(10000, 2 * (hid_idx // 2) / d_hid)
+
+    def get_posi_angle_vec(position):
+        return [cal_angle(position, hid_j) for hid_j in range(d_hid)]
+
+    sinusoid_table = np.array([get_posi_angle_vec(pos_i) for pos_i in range(n_position)])
+
+    sinusoid_table[:, 0::2] = np.sin(sinusoid_table[:, 0::2])  # dim 2i
+    sinusoid_table[:, 1::2] = np.cos(sinusoid_table[:, 1::2])  # dim 2i+1
+
+    return torch.FloatTensor(sinusoid_table)
+class PositionwiseFeedForward(nn.Module):
+    ''' A two-feed-forward-layer module '''
+
+    def __init__(self, d_in, d_hid, dropout=0.1):
+        super().__init__()
+        self.w_1 = nn.Conv1d(d_in, d_hid, 1) # position-wise
+        self.w_2 = nn.Conv1d(d_hid, d_in, 1) # position-wise
+        self.layer_norm = nn.LayerNorm(d_in)
+        self.dropout = nn.Dropout(dropout)
+
+    def forward(self, x):
+        residual = x
+        output = x.transpose(1, 2)
+        output = self.w_2(F.relu(self.w_1(output)))
+        output = output.transpose(1, 2)
+        output = self.dropout(output)
+        output = self.layer_norm(output + residual)
+        return output
 
 class AttentionLayer(nn.Module):
     def __init__(self, hidden_dim_en, hidden_dim_de, projected_size):
@@ -29,7 +62,7 @@ class AttentionLayer(nn.Module):
 
         return a
 
-def graph_attn(alpha, cen_state, adj_state, max_len, last):
+def graph_attn(alpha, cen_state, adj_state, max_len):
     """
     graph attention. calculate the graph attention score for cen_state
     Args:
@@ -44,7 +77,7 @@ def graph_attn(alpha, cen_state, adj_state, max_len, last):
     batch_size = cen_state.shape[0]
     hidden_dim = cen_state.shape[-1]
     # concatenate 将解码节点与编码节点拼接，构成图
-    state = torch.cat((cen_state, adj_state), dim=1) # batch_size * max_len + 1 * hidden_dim
+    state = torch.cat((cen_state.unsqueeze(1), adj_state), dim=1) # batch_size * max_len + 1 * hidden_dim
     
     M = nn.Linear(hidden_dim, hidden_dim).cuda() 
     W = M(state) # batch_size * max_len + 1 * hidden_dim
@@ -67,14 +100,14 @@ def graph_attn(alpha, cen_state, adj_state, max_len, last):
     Y = torch.unsqueeze(Y, -1)
     score = (1 - alpha) * torch.matmul(Q, Y)
     score = F.softmax(score, dim=1)
-    score_mask = (score.squeeze() - last) > 0
-    score_mask = score_mask.float()
-    score = (score.squeeze() - last) * score_mask
-    score_sum = score.sum(1).unsqueeze(1)
-    score = score[:] / score_sum[:]
-    state = torch.matmul(state.transpose(1, 2), score.unsqueeze(2)) # 64*512*1
+    # score_mask = (score.squeeze() - last) > 0
+    # score_mask = score_mask.float()
+    # score = (score.squeeze() - last) * score_mask
+    # score_sum = score.sum(1).unsqueeze(1)
+    # score = score[:] / score_sum[:]
+    state = torch.matmul(state.transpose(1, 2), score).squeeze() # 64*512*1
 
-    return score, state
+    return state
 
 def _smallest(matrix, k, only_first_row=False):
     # matrix ： beam*vocab（记录了到当前步骤的总cost）  k：beam
@@ -124,8 +157,13 @@ class VisualEncoder(nn.Module):
             #                             nn.BatchNorm1d(self.hidden_dim),
             #                             nn.ReLU(True))
             # 线性层 + 门控
-            self.linear_fun = nn.Sequential(nn.Linear(self.hidden_dim, self.hidden_dim), nn.Sigmoid())
-            self.linear_mem = nn.Linear(self.hidden_dim * 2, self.hidden_dim)
+            # self.attention = MultiHeadAttention(8, self.hidden_dim, 64, 64)
+            # self.pos_ffn = PositionwiseFeedForward(self.hidden_dim, 2048)
+            self.attention = luong_gate_attention(self.hidden_dim, self.embed_dim)
+            self.linear_read = nn.Sequential(nn.Linear(self.hidden_dim * 2, self.hidden_dim), nn.Sigmoid())
+            self.linear_write = nn.Sequential(nn.Linear(self.hidden_dim, self.hidden_dim), nn.Sigmoid())
+            self.linear_mem = nn.Linear(self.hidden_dim * 3, self.hidden_dim)
+            # self.position_enc = nn.Embedding.from_pretrained(get_sinusoid_encoding_table(self.hidden_dim), freeze=True)
         self.project_layer = nn.Linear(self.hidden_dim * 2, self.embed_dim)
         self.relu = nn.ReLU()
         if self.with_position: # 是否可以改为transformer那样的position
@@ -159,36 +197,36 @@ class VisualEncoder(nn.Module):
                 position = torch.tensor(input.data.new(batch_size).long().fill_(i))
                 out[:, i, :] = out[:, i, :] + self.position_embed(position)
         
-        if self.opt.context_dec:
-            # state = (hidden[0].unsqueeze(0), hidden[1].unsqueeze(0))
-            # Mem = state[0] # 初始化 memory
-            # g = self.linear_mem()
-            # weights = []
-            # state = (hidden[0].unsqueeze(0), hidden[1].unsqueeze(0))
-            # result = []
-            # last = (torch.ones(self.story_size + 1) / (self.story_size + 1)).unsqueeze(0).repeat(batch_size, 1).cuda()
-            # for i in range(self.story_size): 
-            #     output1, state = self.rnn_dec(out[:, i, :].unsqueeze(1), state)
-            #     weights, output2 = graph_attn(self.opt.alpha, output1, out, self.story_size, last)
-            #     last = weights
-            #     output = output1.squeeze() + output2.squeeze()
-            #     # output = torch.cat([output1.squeeze(), output2.squeeze()], dim=-1)
-            #     # output = self.linear_fun(output)
-            #     result.append(output.squeeze())
-            # out = torch.stack(result).transpose(0, 1)
-            
+        if self.opt.context_dec:            
             state = (hidden[0].unsqueeze(0), hidden[1].unsqueeze(0))
-            mem = out.sum(dim=1) # 64*512
+            # self.attention.init_context(out)
+            # mem, weights = self.attention(out, selfatt=True)
+            # pos_inp = torch.tensor([0,1,2,3,4]).unsqueeze(0).cuda()
+            # pos_inp = pos_inp.repeat(batch_size, 1)
+            # pos = self.position_enc(pos_inp)
+            
+            # T_input = out + pos
+            # mem, _ = self.attention(T_input, T_input, T_input)
+            # mem = self.pos_ffn(mem)
+            mem = out
+            mem = mem.sum(dim=1) # 64*512
             result = []
+            self.attention.init_context(out)
             for i in range(self.story_size):
-                g = self.linear_fun(state[0].squeeze())
-                mem = g * mem
-                inp = torch.cat((out[:, i, :], mem), 1)
-                inp = self.linear_mem(inp).unsqueeze(1)
+                # graph_res = graph_attn(self.opt.alpha, state[0].squeeze(), out, self.story_size) # 64*6*1
+                # graph_res = torch.matmul(out.transpose(1, 2), weights).squeeze()
+                att, _ = self.attention(state[0].squeeze())
+                g_r = self.linear_read(torch.cat([state[0].squeeze(), att.squeeze()], dim=-1))
+                # g_r = self.linear_read(state[0].squeeze())
+                mem_inp = g_r * mem
+                inp = torch.cat((out[:, i, :], mem_inp, att), 1)
+                inp = self.linear_mem(inp).unsqueeze(1) # 64*1*512
                 output, state = self.rnn_dec(inp, state)
+                g_w = self.linear_write(state[0].squeeze())
+                mem = g_w * mem
                 result.append(output.squeeze())
             out = torch.stack(result).transpose(0, 1)
-        return out, state
+        return out, state, mem
 
 class CaptionEncoder(nn.Module):
 
@@ -290,7 +328,7 @@ class CaptionEncoder(nn.Module):
         return outputs, state
 
 
-def graph_attn(alpha, cen_state, adj_state, M, max_len):
+def graph_attention(alpha, cen_state, adj_state, max_len):
     """
     graph attention. calculate the graph attention score for cen_state
 
@@ -304,38 +342,31 @@ def graph_attn(alpha, cen_state, adj_state, M, max_len):
         socre: tensor batch_size * max_len
     """
     batch_size = cen_state.shape[0]
+    hidden_dim = cen_state.shape[-1]
     # concatenate 将解码节点与编码节点拼接，构成图
-    state = torch.cat((cen_state, adj_state), dim=1) # batch_size * max_len + 1 * hidden_dim
+    state = torch.cat((cen_state.unsqueeze(1), adj_state), dim=1) # batch_size * max_len + 1 * hidden_dim
     
-    W = torch.matmul(state, M) # batch_size * max_len + 1 * hidden_dim
-    W = torch.matmul(W, state.permute(0, 2, 1)) # batch_size * max_len + 1 * max_len + 1
+    M = nn.Linear(hidden_dim, hidden_dim).cuda() 
+    W = M(state) # batch_size * max_len + 1 * hidden_dim
+    W = torch.matmul(state, W.transpose(1, 2)) # batch_size * max_len + 1 * max_len + 1
     
     W_sum = torch.sum(W, dim=2) # batch_size * max_len + 1
     W_sum = torch.unsqueeze(W_sum, -1) # batch_size * max_len + 1 * 1
     W_sum = W_sum.repeat((1, 1, max_len + 1)) # batch_size * max_len + 1 * max_len + 1
     
-    D = torch.eye(max_len + 1) # max_len + 1 * max_len + 1
+    D = torch.eye(max_len + 1).cuda() # max_len + 1 * max_len + 1
     D = torch.unsqueeze(D, 0) # 1 * max_len + 1 * max_len + 1
-    D = D.repeat((batch_size, 1, 1)) * W_sum # batch_size * max_len + 1 * max_len + 1
+    D = D.repeat((batch_size, 1, 1)) * W_sum # batch_size * max_len + 1 * max_len + 1 点乘
     P = alpha * torch.matmul(W, torch.inverse(D[:])) # batch_size * max_len + 1 * max_len + 1
 
-    I = torch.unsqueeze(torch.eye(max_len + 1), 0) # 1 * max_len + 1 * max_len + 1
+    I = torch.unsqueeze(torch.eye(max_len + 1), 0).cuda() # 1 * max_len + 1 * max_len + 1
     I = I.repeat(batch_size, 1, 1) - P # batch_size * max_len + 1 * max_len + 1
     Q = torch.inverse(I[:]) # batch_size * max_len + 1 * max_len + 1
     
-    Y = torch.cat((torch.ones((batch_size, 1)), torch.zeros(batch_size, max_len)), 1) # batch_size * max_len + 1
+    Y = torch.cat((torch.ones((batch_size, 1)), torch.zeros(batch_size, max_len)), 1).cuda() # batch_size * max_len + 1
     Y = torch.unsqueeze(Y, -1)
     score = (1 - alpha) * torch.matmul(Q, Y)
-    score = torch.squeeze(score, -1)
-    return score[:, 1:]
+    score = F.softmax(score[:, 1:], dim=1) # 64*6*1
 
+    return score
 
-if __name__ == "__main__":
-    alpha = 0.9
-    batch_size = 64
-    max_len = 5
-    hidden_dim = 512
-    cen_state = torch.randn((batch_size, 1, hidden_dim))
-    adj_state = torch.randn((batch_size, max_len, hidden_dim))
-    M = torch.randn((hidden_dim, hidden_dim))
-    graph_attn(alpha, cen_state, adj_state, M, max_len)

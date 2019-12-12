@@ -205,7 +205,7 @@ if __name__ == "__main__":
     opt.trick = True
     opt.option = 'train'
     # opt.id = 'test'
-
+    # opt.resume_from = "./data/multhead"
     # 训练模式还是测试模式
     if opt.option == 'train':
         print('Begin training:')
